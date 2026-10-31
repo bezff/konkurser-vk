@@ -33,7 +33,16 @@ function check(bool $ok, string $label): void
 function reset_tables(PDO $pdo): void
 {
     $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
-    foreach (['actions', 'callback_events', 'callback_log', 'contests', 'participants', 'login_attempts', 'settings'] as $table) {
+    foreach ([
+        'actions',
+        'acceptances',
+        'callback_events',
+        'callback_log',
+        'contests',
+        'participants',
+        'login_attempts',
+        'settings',
+    ] as $table) {
         $pdo->exec('TRUNCATE TABLE ' . $table);
     }
     $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
@@ -265,6 +274,99 @@ callback_handle($pdo, [
 $nameless = (string) ob_get_clean();
 $activeId = (int) contest_find_active($pdo)['id'];
 check($nameless === 'ok' && points_of($pdo, $activeId, 11) === 1, 'score stands when VK does not return a name');
+
+check(contest_finish($pdo) === null, 'finish second contest');
+
+$noApp = contest_start($pdo, [
+    'title' => 'С принятием',
+    'starts_at' => $start,
+    'ends_at' => $end,
+    'require_accept' => '1',
+]);
+check($noApp === 'Сначала укажите мини-приложение на странице «Подключение».', 'accept needs mini app');
+
+settings_set_many($pdo, [
+    'vk_app_id' => '6736218',
+    'vk_app_secret' => 'wvl68m4dR1UpLrVRli',
+]);
+check(
+    contest_start($pdo, [
+        'title' => 'С принятием',
+        'starts_at' => $start,
+        'ends_at' => $end,
+        'require_accept' => '1',
+    ]) === null,
+    'start contest with accept'
+);
+$acceptContest = contest_find_active($pdo);
+$acceptId = (int) $acceptContest['id'];
+check((int) $acceptContest['require_accept'] === 1, 'require_accept stored');
+
+post_event($pdo, [
+    'type' => 'like_add',
+    'event_id' => 'held-like',
+    'group_id' => 10,
+    'secret' => 'secret-key',
+    'object' => ['liker_id' => 21, 'object_type' => 'post', 'object_owner_id' => -10, 'object_id' => 40],
+]);
+check(points_of($pdo, $acceptId, 21) === 0, 'like before accept gives 0 in rating');
+$heldRow = $pdo->prepare(
+    "SELECT status FROM actions WHERE contest_id = ? AND action_key = 'like:-10:40:21'"
+);
+$heldRow->execute([$acceptId]);
+check((string) $heldRow->fetchColumn() === 'held', 'like stored as held');
+
+post_event($pdo, [
+    'type' => 'like_add',
+    'event_id' => 'held-like-2',
+    'group_id' => 10,
+    'secret' => 'secret-key',
+    'object' => ['liker_id' => 21, 'object_type' => 'post', 'object_owner_id' => -10, 'object_id' => 41],
+]);
+post_event($pdo, [
+    'type' => 'like_remove',
+    'event_id' => 'held-like-2-off',
+    'group_id' => 10,
+    'secret' => 'secret-key',
+    'object' => ['liker_id' => 21, 'object_type' => 'post', 'object_owner_id' => -10, 'object_id' => 41],
+]);
+
+$accepted = contest_accept($pdo, $acceptId, 21, app_now(), ['first_name' => 'Анна', 'last_name' => 'Тест']);
+check($accepted['code'] === 'accepted', 'accept records user');
+check(points_of($pdo, $acceptId, 21) === 1, 'held like becomes active after accept');
+$revokedHeld = $pdo->prepare(
+    "SELECT status FROM actions WHERE contest_id = ? AND action_key = 'like:-10:41:21'"
+);
+$revokedHeld->execute([$acceptId]);
+check((string) $revokedHeld->fetchColumn() === 'revoked', 'unlike before accept stays revoked');
+
+post_event($pdo, [
+    'type' => 'like_add',
+    'event_id' => 'after-accept-like',
+    'group_id' => 10,
+    'secret' => 'secret-key',
+    'object' => ['liker_id' => 21, 'object_type' => 'post', 'object_owner_id' => -10, 'object_id' => 42],
+]);
+check(points_of($pdo, $acceptId, 21) === 2, 'like after accept awards immediately');
+
+check(contest_finish($pdo) === null, 'finish accept contest');
+check(
+    contest_start($pdo, [
+        'title' => 'Без галочки',
+        'starts_at' => $start,
+        'ends_at' => $end,
+    ]) === null,
+    'start without accept flag'
+);
+$plainId = (int) contest_find_active($pdo)['id'];
+post_event($pdo, [
+    'type' => 'like_add',
+    'event_id' => 'plain-like',
+    'group_id' => 10,
+    'secret' => 'secret-key',
+    'object' => ['liker_id' => 31, 'object_type' => 'post', 'object_owner_id' => -10, 'object_id' => 50],
+]);
+check(points_of($pdo, $plainId, 31) === 1, 'contest without accept scores immediately');
 
 for ($i = 0; $i < 8; $i++) {
     auth_login($pdo, 'nope', '203.0.113.9');

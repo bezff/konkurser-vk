@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS contests (
     starts_at DATETIME NOT NULL,
     ends_at DATETIME NOT NULL,
     status VARCHAR(16) NOT NULL,
+    require_accept TINYINT(1) NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL,
     finished_at DATETIME NULL,
     PRIMARY KEY (id),
@@ -22,6 +23,14 @@ CREATE TABLE IF NOT EXISTS participants (
     last_name VARCHAR(80) NOT NULL DEFAULT '',
     profile_updated_at DATETIME NULL,
     PRIMARY KEY (vk_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS acceptances (
+    contest_id BIGINT UNSIGNED NOT NULL,
+    vk_user_id BIGINT UNSIGNED NOT NULL,
+    accepted_at DATETIME NOT NULL,
+    PRIMARY KEY (contest_id, vk_user_id),
+    CONSTRAINT fk_acceptances_contest FOREIGN KEY (contest_id) REFERENCES contests (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS actions (

@@ -95,17 +95,90 @@ check($repost['reason'] === 'repost', 'repost ignored');
 $fresh = scoring_transition(null, true, 2);
 check($fresh['op'] === 'insert' && $fresh['result'] === 'awarded' && $fresh['points'] === 2, 'first award');
 
+$held = scoring_transition(null, true, 2, 'held');
+check($held['op'] === 'insert' && $held['result'] === 'held' && $held['status'] === 'held', 'first award held');
+
 $again = scoring_transition(['status' => 'active', 'points' => 2], true, 9);
 check($again['result'] === 'duplicate' && $again['points'] === 2, 'duplicate keeps old points');
+
+$heldDup = scoring_transition(['status' => 'held', 'points' => 2], true, 9, 'held');
+check($heldDup['result'] === 'duplicate', 'held duplicate');
 
 $revoked = scoring_transition(['status' => 'active', 'points' => 2], false, 9);
 check($revoked['op'] === 'update' && $revoked['result'] === 'revoked' && $revoked['points'] === 2, 'revoke keeps stored points');
 
+$revokeHeld = scoring_transition(['status' => 'held', 'points' => 2], false, 9);
+check($revokeHeld['result'] === 'revoked' && $revokeHeld['status'] === 'revoked', 'revoke held');
+
 $back = scoring_transition(['status' => 'revoked', 'points' => 2], true, 4);
 check($back['result'] === 'awarded' && $back['points'] === 4, 'reactivation uses current points');
 
+$backHeld = scoring_transition(['status' => 'revoked', 'points' => 2], true, 4, 'held');
+check($backHeld['result'] === 'held' && $backHeld['status'] === 'held', 'reactivation held');
+
 $missing = scoring_transition(null, false, 1);
 check($missing['result'] === 'noop', 'revoke without award is noop');
+
+$vkParams = [
+    'vk_user_id' => '494075',
+    'vk_app_id' => '6736218',
+    'vk_is_app_user' => '1',
+    'vk_are_notifications_enabled' => '1',
+    'vk_language' => 'ru',
+    'vk_access_token_settings' => '',
+    'vk_platform' => 'android',
+    // актуальный пример из JS-дока ВК (PHP-фрагмент там со старой подписью)
+    'sign' => 'htQFduJpLxz7ribXRZpDFUH-XEUhC9rBPTJkjUFEkRA',
+];
+$signOnly = [];
+foreach ($vkParams as $name => $value) {
+    if (strpos($name, 'vk_') === 0) {
+        $signOnly[$name] = $value;
+    }
+}
+ksort($signOnly);
+$expectedSign = rtrim(
+    strtr(
+        base64_encode(hash_hmac('sha256', http_build_query($signOnly), 'wvl68m4dR1UpLrVRli', true)),
+        '+/',
+        '-_'
+    ),
+    '='
+);
+check($expectedSign === $vkParams['sign'], 'vk docs sign example');
+
+$vkParams['vk_ts'] = (string) time();
+$signOnly['vk_ts'] = $vkParams['vk_ts'];
+ksort($signOnly);
+$vkParams['sign'] = rtrim(
+    strtr(
+        base64_encode(hash_hmac('sha256', http_build_query($signOnly), 'wvl68m4dR1UpLrVRli', true)),
+        '+/',
+        '-_'
+    ),
+    '='
+);
+$vkParams['vk_group_id'] = '10';
+$signOnly['vk_group_id'] = '10';
+ksort($signOnly);
+$vkParams['sign'] = rtrim(
+    strtr(
+        base64_encode(hash_hmac('sha256', http_build_query($signOnly), 'wvl68m4dR1UpLrVRli', true)),
+        '+/',
+        '-_'
+    ),
+    '='
+);
+$wrongGroup = vk_launch_verify($vkParams, 'wvl68m4dR1UpLrVRli', 6736218, 999);
+check($wrongGroup['ok'] === false && ($wrongGroup['reason'] ?? '') === 'bad_group', 'launch needs matching group');
+
+$okLaunch = vk_launch_verify($vkParams, 'wvl68m4dR1UpLrVRli', 6736218, 10);
+check($okLaunch['ok'] === true && (int) $okLaunch['user_id'] === 494075, 'launch verify ok');
+
+$bad = $vkParams;
+$bad['vk_user_id'] = '1';
+$badLaunch = vk_launch_verify($bad, 'wvl68m4dR1UpLrVRli', 6736218, 10);
+check($badLaunch['ok'] === false && ($badLaunch['reason'] ?? '') === 'bad_sign', 'tampered user fails');
 
 check(contest_window_open('active', '2026-11-01 00:00:00', '2026-12-01 00:00:00', '2026-11-15 12:00:00') === 'open', 'window open');
 check(contest_window_open('active', '2026-11-01 00:00:00', '2026-12-01 00:00:00', '2026-10-31 23:00:00') === 'early', 'window early');

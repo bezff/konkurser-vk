@@ -16,7 +16,7 @@ function contest_close_expired(PDO $pdo): void
 function contest_find_active(PDO $pdo): ?array
 {
     $st = $pdo->query(
-        "SELECT id, title, starts_at, ends_at, status, created_at, finished_at
+        "SELECT id, title, starts_at, ends_at, status, require_accept, created_at, finished_at
          FROM contests
          WHERE status = 'active'
          ORDER BY id DESC
@@ -29,7 +29,7 @@ function contest_find_active(PDO $pdo): ?array
 function contest_find(PDO $pdo, int $id): ?array
 {
     $st = $pdo->prepare(
-        'SELECT id, title, starts_at, ends_at, status, created_at, finished_at
+        'SELECT id, title, starts_at, ends_at, status, require_accept, created_at, finished_at
          FROM contests WHERE id = ?'
     );
     $st->execute([$id]);
@@ -40,7 +40,7 @@ function contest_find(PDO $pdo, int $id): ?array
 function contest_list(PDO $pdo): array
 {
     return $pdo->query(
-        'SELECT id, title, starts_at, ends_at, status, created_at, finished_at
+        'SELECT id, title, starts_at, ends_at, status, require_accept, created_at, finished_at
          FROM contests
          ORDER BY id DESC
          LIMIT 24'
@@ -79,6 +79,11 @@ function contest_start(PDO $pdo, array $post): ?string
         return 'Срок конкурса не больше 400 дней.';
     }
 
+    $requireAccept = !empty($post['require_accept']);
+    if ($requireAccept && !settings_miniapp_ready($settings)) {
+        return 'Сначала укажите мини-приложение на странице «Подключение».';
+    }
+
     db_lock($pdo, 'konkurser');
     try {
         contest_close_expired($pdo);
@@ -87,9 +92,10 @@ function contest_start(PDO $pdo, array $post): ?string
         }
         $now = app_now();
         $st = $pdo->prepare(
-            'INSERT INTO contests (title, starts_at, ends_at, status, created_at) VALUES (?, ?, ?, ?, ?)'
+            'INSERT INTO contests (title, starts_at, ends_at, status, require_accept, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)'
         );
-        $st->execute([$title, $starts, $ends, 'active', $now]);
+        $st->execute([$title, $starts, $ends, 'active', $requireAccept ? 1 : 0, $now]);
     } finally {
         db_unlock($pdo, 'konkurser');
     }
@@ -211,14 +217,15 @@ function scoring_apply(
     array $decision,
     int $points,
     string $now,
-    ?array $profile
+    ?array $profile,
+    string $awardStatus = 'active'
 ): string {
     $st = $pdo->prepare(
         'SELECT vk_user_id, points, status FROM actions WHERE contest_id = ? AND action_key = ? FOR UPDATE'
     );
     $st->execute([$contestId, $decision['key']]);
     $row = $st->fetch() ?: null;
-    $next = scoring_transition($row, $decision['action'] === 'award', $points);
+    $next = scoring_transition($row, $decision['action'] === 'award', $points, $awardStatus);
 
     if ($next['op'] === 'insert') {
         $userId = (int) $decision['user_id'];
@@ -237,7 +244,7 @@ function scoring_apply(
                 $decision['type'],
                 $decision['key'],
                 $next['points'],
-                'active',
+                $next['status'],
                 $now,
                 $now,
             ]);
@@ -254,11 +261,90 @@ function scoring_apply(
         $upd->execute([$next['status'], $next['points'], $now, $contestId, $decision['key']]);
     }
 
-    if ($next['result'] === 'awarded') {
+    if ($next['result'] === 'awarded' || $next['result'] === 'held') {
         participant_save($pdo, (int) $decision['user_id'], $profile, $now);
     }
 
     return $next['result'];
+}
+
+function contest_user_lock_name(int $contestId, int $userId): string
+{
+    return 'konkurser_u_' . $contestId . '_' . $userId;
+}
+
+function contest_has_accepted(PDO $pdo, int $contestId, int $userId): bool
+{
+    if ($userId <= 0) {
+        return false;
+    }
+    $st = $pdo->prepare(
+        'SELECT 1 FROM acceptances WHERE contest_id = ? AND vk_user_id = ? LIMIT 1'
+    );
+    $st->execute([$contestId, $userId]);
+    return (bool) $st->fetchColumn();
+}
+
+function contest_accept_count(PDO $pdo, int $contestId): int
+{
+    $st = $pdo->prepare('SELECT COUNT(*) FROM acceptances WHERE contest_id = ?');
+    $st->execute([$contestId]);
+    return (int) $st->fetchColumn();
+}
+
+function contest_accept_url(array $settings): string
+{
+    $appId = (int) ($settings['vk_app_id'] ?? 0);
+    $groupId = (int) ($settings['vk_group_id'] ?? 0);
+    if ($appId <= 0 || $groupId <= 0) {
+        return '';
+    }
+    return 'https://vk.com/app' . $appId . '_-' . $groupId;
+}
+
+/**
+ * @return array{code:string,detail:string}
+ */
+function contest_accept(PDO $pdo, int $contestId, int $userId, string $now, ?array $profile): array
+{
+    if ($userId <= 0) {
+        return ['code' => 'ignored', 'detail' => 'bad_user'];
+    }
+
+    $lock = contest_user_lock_name($contestId, $userId);
+    db_lock($pdo, $lock);
+    try {
+        return db_transaction($pdo, function (PDO $pdo) use ($contestId, $userId, $now, $profile): array {
+            if (contest_has_accepted($pdo, $contestId, $userId)) {
+                return ['code' => 'already', 'detail' => (string) $userId];
+            }
+
+            $ins = $pdo->prepare(
+                'INSERT INTO acceptances (contest_id, vk_user_id, accepted_at) VALUES (?, ?, ?)'
+            );
+            try {
+                $ins->execute([$contestId, $userId, $now]);
+            } catch (PDOException $e) {
+                if ((string) $e->getCode() === '23000') {
+                    return ['code' => 'already', 'detail' => (string) $userId];
+                }
+                throw $e;
+            }
+
+            $upd = $pdo->prepare(
+                "UPDATE actions
+                 SET status = 'active', updated_at = ?
+                 WHERE contest_id = ? AND vk_user_id = ? AND status = 'held'"
+            );
+            $upd->execute([$now, $contestId, $userId]);
+
+            participant_save($pdo, $userId, $profile, $now);
+
+            return ['code' => 'accepted', 'detail' => (string) $userId];
+        });
+    } finally {
+        db_unlock($pdo, $lock);
+    }
 }
 
 function participant_save(PDO $pdo, int $userId, ?array $profile, string $now): void

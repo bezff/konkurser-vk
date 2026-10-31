@@ -47,9 +47,12 @@ $ready = settings_requirements_error($settings);
 view_start('Конкурс', 'contest', (string) ($settings['vk_group_name'] ?? ''));
 view_flash($flash);
 
+$miniappReady = settings_miniapp_ready($settings);
+
 if ($active !== null) {
     $state = contest_status_view($active, $now);
     $stats = contest_stats($pdo, (int) $active['id']);
+    $requireAccept = (int) ($active['require_accept'] ?? 0) === 1;
     echo '<section class="panel">';
     echo '<div class="panel-head"><h1>' . h($active['title']) . '</h1>';
     echo '<p class="status ' . h($state['class']) . '">' . h($state['label']) . '</p></div>';
@@ -58,9 +61,25 @@ if ($active !== null) {
     echo '<div><dt>Окончание</dt><dd>' . h(view_datetime($active['ends_at'])) . '</dd></div>';
     echo '<div><dt>Участники</dt><dd>' . (int) $stats['users'] . '</dd></div>';
     echo '<div><dt>Сумма баллов</dt><dd>' . (int) $stats['points'] . '</dd></div>';
+    if ($requireAccept) {
+        echo '<div><dt>Приняли акцию</dt><dd>' . contest_accept_count($pdo, (int) $active['id']) . '</dd></div>';
+    }
     echo '</dl>';
     if ($state['class'] === 'is-wait') {
         echo '<p class="hint">Начисление начнётся в указанное время. До этого события приходят, но баллы не ставятся.</p>';
+    }
+    if ($requireAccept) {
+        $acceptUrl = contest_accept_url($settings);
+        echo '<h2>Ссылка для записи</h2>';
+        echo '<p class="lead">Вставьте её в пост конкурса. Пока человек не откроет ссылку внутри ВК, его лайки и комментарии в рейтинг не попадают.</p>';
+        if ($acceptUrl !== '') {
+            echo '<div class="copy-row">';
+            echo '<input id="accept-url" readonly value="' . h($acceptUrl) . '">';
+            echo '<button type="button" class="ghost" data-copy="accept-url">Скопировать</button>';
+            echo '</div>';
+        } else {
+            echo '<p class="flash bad">Мини-приложение не настроено. <a href="index.php?page=connect">Открыть подключение</a></p>';
+        }
     }
     echo '<div class="actions">';
     echo '<a class="button" href="index.php?page=rating&id=' . (int) $active['id'] . '">Открыть рейтинг</a>';
@@ -90,6 +109,15 @@ if ($active !== null) {
     echo '<input id="ends_at" name="ends_at" type="datetime-local" required value="' . h($endDefault) . '"></div>';
     echo '</div>';
     echo '<p class="hint" id="date-hint">В минуту окончания начисление уже останавливается. Чтобы конкурс шёл до конца дня, поставьте 00:00 следующего дня.</p>';
+    echo '<label class="check">';
+    echo '<input type="checkbox" name="require_accept" value="1"' . ($miniappReady ? '' : ' disabled') . '>';
+    echo '<span>Учитывать баллы только после перехода по ссылке</span>';
+    echo '</label>';
+    if ($miniappReady) {
+        echo '<p class="hint">В запись нужно будет вставить ссылку мини-приложения. Пока человек её не откроет, лайки и комментарии в рейтинг не попадут.</p>';
+    } else {
+        echo '<p class="hint">Чтобы включить, сначала укажите ID и защищённый ключ мини-приложения на странице <a href="index.php?page=connect">Подключение</a>.</p>';
+    }
     echo '<button type="submit"' . ($ready !== null ? ' disabled' : '') . '>Запустить</button>';
     echo '</form></section>';
 }
@@ -101,6 +129,7 @@ echo '<li><strong>Вступление, ' . settings_points($settings, 'join') .
 echo '<li><strong>Лайк записи, ' . settings_points($settings, 'like') . '.</strong> Только отметка «Мне нравится» на записи стены сообщества. Лайк комментария, фото, видео или товара не считается. Снятие лайка забирает балл.</li>';
 echo '<li><strong>Комментарий, ' . settings_points($settings, 'comment') . '.</strong> Комментарий или ответ под записью стены сообщества. Удаление снимает баллы, восстановление возвращает их. Правка текста счёт не меняет. Комментарий от имени сообщества не считается.</li>';
 echo '<li><strong>Репост не считается.</strong> ВК сообщает о новом репосте, но не об удалении. Снять баллы за удалённый репост нельзя. Сам репост к тому же появляется на стене участника, вне сообщества.</li>';
+echo '<li><strong>Принятие по ссылке.</strong> Если при запуске включена галочка, баллы появляются только после открытия ссылки мини-приложения из записи. Действия до перехода сохраняются и засчитываются в момент принятия; снятие лайка или удаление комментария до принятия отменяет их.</li>';
 echo '</ul>';
 echo '<p class="hint">Повтор одного и того же действия не удваивает баллы. Ноль в настройках выключает действие. Уже поставленные баллы при смене настроек не пересчитываются. <a href="index.php?page=connect">Изменить баллы</a></p>';
 echo '</section>';

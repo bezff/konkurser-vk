@@ -109,6 +109,31 @@ function settings_save_connection(PDO $pdo, array $post): ?string
         $points[$key] = $parsed;
     }
 
+    $appIdRaw = trim((string) ($post['vk_app_id'] ?? ''));
+    $appId = 0;
+    if ($appIdRaw !== '') {
+        if (!preg_match('/^\d{1,12}$/', $appIdRaw) || (int) $appIdRaw <= 0) {
+            return 'ID мини-приложения: положительное целое число.';
+        }
+        $appId = (int) $appIdRaw;
+    }
+
+    $appSecret = trim((string) ($post['vk_app_secret'] ?? ''));
+    if ($appSecret === '') {
+        $appSecret = (string) ($current['vk_app_secret'] ?? '');
+    }
+    if ($appSecret !== '' && (strlen($appSecret) < 8 || strlen($appSecret) > 200)) {
+        return 'Защищённый ключ мини-приложения: от 8 до 200 символов.';
+    }
+    if ($appSecret !== '' && preg_match('/\s/', $appSecret)) {
+        return 'Защищённый ключ не должен содержать пробелы.';
+    }
+    if ($appId === 0) {
+        $appSecret = '';
+    } elseif ($appSecret === '') {
+        return 'Вставьте защищённый ключ мини-приложения.';
+    }
+
     try {
         $group = vk_resolve_group($token, $groupKey);
     } catch (Throwable $e) {
@@ -122,6 +147,13 @@ function settings_save_connection(PDO $pdo, array $post): ?string
     if ($active !== null && $currentGroup > 0 && $group['id'] !== $currentGroup) {
         return 'Нельзя сменить сообщество, пока конкурс не завершён.';
     }
+    if (
+        $active !== null
+        && (int) ($active['require_accept'] ?? 0) === 1
+        && ($appId <= 0 || $appSecret === '')
+    ) {
+        return 'Пока идёт конкурс с принятием акции, мини-приложение нельзя отключить.';
+    }
 
     settings_set_many($pdo, [
         'vk_group_id' => (string) $group['id'],
@@ -129,12 +161,20 @@ function settings_save_connection(PDO $pdo, array $post): ?string
         'vk_access_token' => $token,
         'vk_secret' => $secret,
         'vk_confirmation' => $confirmation,
+        'vk_app_id' => $appId > 0 ? (string) $appId : '',
+        'vk_app_secret' => $appSecret,
         'points_join' => (string) $points['join'],
         'points_like' => (string) $points['like'],
         'points_comment' => (string) $points['comment'],
     ]);
 
     return null;
+}
+
+function settings_miniapp_ready(array $settings): bool
+{
+    return (int) ($settings['vk_app_id'] ?? 0) > 0
+        && ($settings['vk_app_secret'] ?? '') !== '';
 }
 
 function settings_requirements_error(array $settings): ?string

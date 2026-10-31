@@ -114,19 +114,56 @@ function callback_process(
         }
     }
 
-    return db_transaction($pdo, function (PDO $pdo) use ($contest, $decision, $points, $now, $profile, $eventId, $type): array {
+    $contestId = (int) $contest['id'];
+    $requireAccept = (int) ($contest['require_accept'] ?? 0) === 1;
+
+    $run = function (PDO $pdo) use (
+        $contestId,
+        $decision,
+        $points,
+        $now,
+        $profile,
+        $eventId,
+        $type,
+        $requireAccept,
+        $userId
+    ): array {
         if ($eventId !== '') {
             if (!callback_remember($pdo, $eventId, $type, $now)) {
                 return ['code' => 'duplicate', 'detail' => ''];
             }
         }
-        $code = scoring_apply($pdo, (int) $contest['id'], $decision, $points, $now, $profile);
+
+        $awardStatus = 'active';
+        if ($decision['action'] === 'award' && $requireAccept) {
+            $awardUser = (int) ($decision['user_id'] ?? 0);
+            if ($awardUser > 0 && !contest_has_accepted($pdo, $contestId, $awardUser)) {
+                $awardStatus = 'held';
+            }
+        }
+
+        $code = scoring_apply($pdo, $contestId, $decision, $points, $now, $profile, $awardStatus);
         $detail = '';
-        if (($code === 'awarded' || $code === 'revoked') && (int) ($decision['user_id'] ?? 0) > 0) {
+        if (
+            ($code === 'awarded' || $code === 'revoked' || $code === 'held')
+            && (int) ($decision['user_id'] ?? 0) > 0
+        ) {
             $detail = (string) (int) $decision['user_id'];
         }
         return ['code' => $code, 'detail' => $detail];
-    });
+    };
+
+    if ($userId > 0) {
+        $lock = contest_user_lock_name($contestId, $userId);
+        db_lock($pdo, $lock);
+        try {
+            return db_transaction($pdo, $run);
+        } finally {
+            db_unlock($pdo, $lock);
+        }
+    }
+
+    return db_transaction($pdo, $run);
 }
 
 function callback_event_id(mixed $value): string
@@ -215,6 +252,7 @@ function callback_result_label(string $code): string
 {
     $map = [
         'awarded' => 'балл начислен',
+        'held' => 'ждёт принятия акции',
         'revoked' => 'балл снят',
         'duplicate' => 'повтор',
         'ignored' => 'не считается',

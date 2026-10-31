@@ -73,6 +73,16 @@ echo '<label for="secret">Секретный ключ</label>';
 echo '<input id="secret" name="secret" value="' . h($secretValue) . '" spellcheck="false" autocomplete="off" aria-describedby="secret-hint">';
 echo '<p class="hint" id="secret-hint">Скопируйте его в настройки сервера Callback API. Если стереть поле и сохранить, старый ключ останется.</p>';
 
+$appId = (string) ($settings['vk_app_id'] ?? '');
+$hasAppSecret = ($settings['vk_app_secret'] ?? '') !== '';
+echo '<label for="vk_app_id">ID мини-приложения</label>';
+echo '<input id="vk_app_id" name="vk_app_id" inputmode="numeric" value="' . h($appId) . '" placeholder="например 51712345" spellcheck="false" aria-describedby="app-id-hint">';
+echo '<p class="hint" id="app-id-hint">Нужен, если в конкурсе баллы только после перехода по ссылке. Создайте мини-приложение на <a href="https://dev.vk.com/" target="_blank" rel="noopener">dev.vk.com</a>.</p>';
+
+echo '<label for="vk_app_secret">Защищённый ключ мини-приложения</label>';
+echo '<input id="vk_app_secret" name="vk_app_secret" type="password" spellcheck="false" autocomplete="off" placeholder="' . h($hasAppSecret ? 'Сохранён. Вставьте новый, чтобы заменить' : 'Из настроек приложения → Ключи доступа') . '" aria-describedby="app-secret-hint">';
+echo '<p class="hint" id="app-secret-hint">Разработка → Ключи доступа → Защищённый ключ. Если стереть поле и сохранить, старый ключ останется.</p>';
+
 echo '<div class="grid-3">';
 echo '<div><label for="points_join">Баллы за вступление</label><input id="points_join" name="points_join" inputmode="numeric" required value="' . settings_points($settings, 'join') . '"></div>';
 echo '<div><label for="points_like">Баллы за лайк</label><input id="points_like" name="points_like" inputmode="numeric" required value="' . settings_points($settings, 'like') . '"></div>';
@@ -81,6 +91,17 @@ echo '</div>';
 echo '<p class="hint">Целое число от 0 до 100. Ноль выключает действие для новых событий.</p>';
 echo '<button type="submit">Сохранить и проверить</button>';
 echo '</form></section>';
+
+$joinUrl = app_base_url() . '/join.php';
+echo '<section class="panel">';
+echo '<h2>Адрес мини-приложения</h2>';
+echo '<p class="lead">Впишите этот URL в настройки мини-приложения как адрес приложения.</p>';
+echo '<div class="copy-row">';
+echo '<input id="join-url" readonly value="' . h($joinUrl) . '">';
+echo '<button type="button" class="ghost" data-copy="join-url">Скопировать</button>';
+echo '</div>';
+echo '<p class="hint">Ссылку для записи конкурса вида vk.com/app…_-… смотрите на странице «Конкурс» после запуска с галочкой принятия.</p>';
+echo '</section>';
 
 echo '<section class="panel">';
 echo '<h2>Адрес для Callback API</h2>';

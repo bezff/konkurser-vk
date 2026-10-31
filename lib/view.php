@@ -25,26 +25,52 @@ function view_datetime_local(string $value): string
     return $dt->format('Y-m-d\TH:i');
 }
 
-function view_start(string $title, ?string $active = null, string $groupName = ''): void
-{
+function view_start(
+    string $title,
+    ?string $active = null,
+    string $groupName = '',
+    bool $allowVkFrame = false,
+    bool $needLaunchParams = false
+): void {
     header('Content-Type: text/html; charset=UTF-8');
-    header('X-Frame-Options: DENY');
     header('X-Content-Type-Options: nosniff');
     header('Referrer-Policy: no-referrer');
     header('Cache-Control: no-store');
-    header("Content-Security-Policy: default-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+    if ($allowVkFrame) {
+        // Без X-Frame-Options: ВК открывает мини-приложение во iframe / WebView.
+        // frame-ancestors * — иначе часть клиентов ВК режет узкий список доменов.
+        header(
+            "Content-Security-Policy: default-src 'self'; style-src 'self'; "
+            . "script-src 'self' https://unpkg.com https://cdn.jsdelivr.net; "
+            . "connect-src 'self' https://api.vk.com https://stat.vk-portal.net https://unpkg.com https://cdn.jsdelivr.net; "
+            . "base-uri 'none'; form-action 'self'; frame-ancestors *"
+        );
+    } else {
+        header('X-Frame-Options: DENY');
+        header(
+            "Content-Security-Policy: default-src 'self'; style-src 'self'; script-src 'self'; "
+            . "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+        );
+    }
 
     $heading = $title . ' · Конкурсьер';
     echo '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">';
     echo '<meta name="viewport" content="width=device-width, initial-scale=1">';
     echo '<title>' . h($heading) . '</title>';
     echo '<link rel="stylesheet" href="assets/style.css">';
-    echo '</head><body>';
+    $bodyClass = $allowVkFrame ? ' class="join-page"' : '';
+    $needAttr = ($allowVkFrame && $needLaunchParams) ? ' data-need-params="1"' : '';
+    echo '</head><body' . $bodyClass . $needAttr . '>';
     echo '<a class="skip" href="#content">К содержимому</a>';
     echo '<div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>';
     echo '<header class="top">';
     echo '<div class="wrap top-row">';
-    echo '<div><a class="brand" href="index.php">Конкурсьер</a>';
+    echo '<div>';
+    if ($allowVkFrame) {
+        echo '<span class="brand">Конкурсьер</span>';
+    } else {
+        echo '<a class="brand" href="index.php">Конкурсьер</a>';
+    }
     if ($groupName !== '') {
         echo '<p class="brand-note">' . h($groupName) . '</p>';
     } else {
@@ -70,9 +96,15 @@ function view_start(string $title, ?string $active = null, string $groupName = '
     echo '</div></header><main id="content" class="wrap">';
 }
 
-function view_end(): void
+function view_end(bool $joinApp = false): void
 {
-    echo '</main><script src="assets/app.js"></script></body></html>';
+    echo '</main>';
+    if ($joinApp) {
+        echo '<script src="assets/join.js"></script>';
+    } else {
+        echo '<script src="assets/app.js"></script>';
+    }
+    echo '</body></html>';
 }
 
 function view_flash(?array $flash): void

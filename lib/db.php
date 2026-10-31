@@ -41,5 +41,52 @@ function db(): PDO
     $offset = (new DateTimeImmutable('now'))->format('P');
     $pdo->exec('SET time_zone = ' . $pdo->quote($offset));
 
+    schema_ensure($pdo);
+
     return $pdo;
+}
+
+function schema_ensure(PDO $pdo): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+
+    try {
+        $pdo->query('SELECT 1 FROM contests LIMIT 1');
+    } catch (Throwable) {
+        return;
+    }
+
+    $done = true;
+
+    if (!schema_has_column($pdo, 'contests', 'require_accept')) {
+        $pdo->exec(
+            'ALTER TABLE contests
+             ADD COLUMN require_accept TINYINT(1) NOT NULL DEFAULT 0
+             AFTER status'
+        );
+    }
+
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS acceptances (
+            contest_id BIGINT UNSIGNED NOT NULL,
+            vk_user_id BIGINT UNSIGNED NOT NULL,
+            accepted_at DATETIME NOT NULL,
+            PRIMARY KEY (contest_id, vk_user_id),
+            CONSTRAINT fk_acceptances_contest FOREIGN KEY (contest_id) REFERENCES contests (id)
+         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+}
+
+function schema_has_column(PDO $pdo, string $table, string $column): bool
+{
+    $st = $pdo->prepare(
+        'SELECT 1 FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
+         LIMIT 1'
+    );
+    $st->execute([$table, $column]);
+    return (bool) $st->fetchColumn();
 }

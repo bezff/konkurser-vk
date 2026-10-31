@@ -145,18 +145,32 @@ function scoring_comment_delete(array $object, int $groupId): array
     ];
 }
 
-function scoring_transition(?array $row, bool $activate, int $points): array
+function scoring_transition(?array $row, bool $activate, int $points, string $awardStatus = 'active'): array
 {
+    if ($awardStatus !== 'held' && $awardStatus !== 'active') {
+        $awardStatus = 'active';
+    }
+
     if ($activate) {
         if ($row === null) {
-            return ['op' => 'insert', 'status' => 'active', 'points' => $points, 'result' => 'awarded'];
+            return [
+                'op' => 'insert',
+                'status' => $awardStatus,
+                'points' => $points,
+                'result' => $awardStatus === 'held' ? 'held' : 'awarded',
+            ];
         }
         if (($row['status'] ?? '') === 'revoked') {
-            return ['op' => 'update', 'status' => 'active', 'points' => $points, 'result' => 'awarded'];
+            return [
+                'op' => 'update',
+                'status' => $awardStatus,
+                'points' => $points,
+                'result' => $awardStatus === 'held' ? 'held' : 'awarded',
+            ];
         }
         return [
             'op' => 'none',
-            'status' => 'active',
+            'status' => (string) ($row['status'] ?? 'active'),
             'points' => (int) ($row['points'] ?? $points),
             'result' => 'duplicate',
         ];
@@ -176,6 +190,71 @@ function scoring_transition(?array $row, bool $activate, int $points): array
         'status' => 'revoked',
         'points' => (int) $row['points'],
         'result' => 'revoked',
+    ];
+}
+
+/**
+ * Проверка подписи параметров запуска мини-приложения ВК.
+ * Алгоритм: https://dev.vk.com/ru/mini-apps/development/launch-params-sign
+ *
+ * @return array{ok:bool,reason?:string,user_id?:int,app_id?:int,group_id?:int,ts?:int}
+ */
+function vk_launch_verify(array $params, string $appSecret, int $expectedAppId, int $expectedGroupId): array
+{
+    if ($appSecret === '' || $expectedAppId <= 0 || $expectedGroupId <= 0) {
+        return ['ok' => false, 'reason' => 'not_configured'];
+    }
+
+    $sign = (string) ($params['sign'] ?? '');
+    if ($sign === '') {
+        return ['ok' => false, 'reason' => 'bad_sign'];
+    }
+
+    $signParams = [];
+    foreach ($params as $name => $value) {
+        if (!is_string($name) || strpos($name, 'vk_') !== 0) {
+            continue;
+        }
+        if (!is_scalar($value)) {
+            return ['ok' => false, 'reason' => 'bad_sign'];
+        }
+        $signParams[$name] = (string) $value;
+    }
+
+    ksort($signParams);
+    $query = http_build_query($signParams);
+    $computed = rtrim(
+        strtr(base64_encode(hash_hmac('sha256', $query, $appSecret, true)), '+/', '-_'),
+        '='
+    );
+    if (!hash_equals($computed, $sign)) {
+        return ['ok' => false, 'reason' => 'bad_sign'];
+    }
+
+    $userId = (int) ($signParams['vk_user_id'] ?? 0);
+    $appId = (int) ($signParams['vk_app_id'] ?? 0);
+    $groupId = (int) ($signParams['vk_group_id'] ?? 0);
+    $ts = (int) ($signParams['vk_ts'] ?? 0);
+
+    if ($userId <= 0) {
+        return ['ok' => false, 'reason' => 'bad_user'];
+    }
+    if ($appId !== $expectedAppId) {
+        return ['ok' => false, 'reason' => 'bad_app'];
+    }
+    if ($groupId !== $expectedGroupId) {
+        return ['ok' => false, 'reason' => 'bad_group'];
+    }
+    if ($ts <= 0 || abs(time() - $ts) > 86400) {
+        return ['ok' => false, 'reason' => 'stale'];
+    }
+
+    return [
+        'ok' => true,
+        'user_id' => $userId,
+        'app_id' => $appId,
+        'group_id' => $groupId,
+        'ts' => $ts,
     ];
 }
 
