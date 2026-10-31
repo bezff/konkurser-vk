@@ -1,0 +1,25 @@
+/config.php
+/storage/install.lock
+/storage/error.log
+/storage/error.log.php
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+.idea/
+.vscode/
+*.code-workspace
+
+.cursor/
+.cursor */
+.cursorrules
+
+vendor/
+.phpunit.result.cache
+*.log
