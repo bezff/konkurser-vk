@@ -89,8 +89,59 @@ check($delete['action'] === 'revoke' && $delete['key'] === 'comment:-10:50', 'de
 $restore = scoring_decide('wall_reply_restore', ['id' => 50, 'from_id' => 7, 'post_owner_id' => -10], 10);
 check($restore['action'] === 'award' && $restore['key'] === $delete['key'], 'restore uses same comment key');
 
-$repost = scoring_decide('wall_repost', ['from_id' => 7, 'id' => 1], 10);
-check($repost['reason'] === 'repost', 'repost ignored');
+$repost = scoring_decide('wall_repost', [
+    'from_id' => 7,
+    'id' => 1,
+    'copy_history' => [
+        ['id' => 40, 'owner_id' => -10],
+    ],
+], 10);
+check(
+    $repost['action'] === 'award'
+        && $repost['type'] === 'repost'
+        && $repost['key'] === 'repost:7'
+        && $repost['user_id'] === 7,
+    'repost of this community counts'
+);
+
+$repostAgain = scoring_decide('wall_repost', [
+    'from_id' => 7,
+    'id' => 2,
+    'copy_history' => [
+        ['id' => 41, 'owner_id' => -10],
+    ],
+], 10);
+check($repostAgain['action'] === 'award' && $repostAgain['key'] === 'repost:7', 'second post keeps the same repost key');
+
+$repostOther = scoring_decide('wall_repost', [
+    'from_id' => 7,
+    'id' => 3,
+    'copy_history' => [
+        ['id' => 1, 'owner_id' => -11],
+    ],
+], 10);
+check($repostOther['action'] === 'ignore' && $repostOther['reason'] === 'not_group', 'other community repost ignored');
+
+$repostCommunity = scoring_decide('wall_repost', [
+    'from_id' => -10,
+    'id' => 4,
+    'copy_history' => [
+        ['id' => 40, 'owner_id' => -10],
+    ],
+], 10);
+check($repostCommunity['action'] === 'ignore' && $repostCommunity['reason'] === 'bad_payload', 'community author repost ignored');
+
+$repostZero = scoring_decide('wall_repost', [
+    'from_id' => 0,
+    'id' => 5,
+    'copy_history' => [
+        ['id' => 40, 'owner_id' => -10],
+    ],
+], 10);
+check($repostZero['action'] === 'ignore' && $repostZero['reason'] === 'bad_payload', 'zero from_id ignored');
+
+$repostBare = scoring_decide('wall_repost', ['from_id' => 7, 'id' => 1], 10);
+check($repostBare['action'] === 'ignore' && $repostBare['reason'] === 'bad_payload', 'missing copy_history ignored');
 
 $fresh = scoring_transition(null, true, 2);
 check($fresh['op'] === 'insert' && $fresh['result'] === 'awarded' && $fresh['points'] === 2, 'first award');

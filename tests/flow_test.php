@@ -78,6 +78,7 @@ settings_set_many($pdo, [
     'points_join' => '5',
     'points_like' => '1',
     'points_comment' => '2',
+    'points_repost' => '2',
 ]);
 
 $_SERVER['REMOTE_ADDR'] = '203.0.113.8';
@@ -219,12 +220,44 @@ check(points_of($pdo, $contestId, 7) === 3, 'leave removes join points');
 
 post_event($pdo, [
     'type' => 'wall_repost',
-    'event_id' => 'repost-1',
+    'event_id' => 'repost-bare',
     'group_id' => 10,
     'secret' => 'secret-key',
     'object' => ['from_id' => 7, 'id' => 80, 'owner_id' => 7],
 ]);
-check(points_of($pdo, $contestId, 7) === 3, 'repost gives nothing');
+check(points_of($pdo, $contestId, 7) === 3, 'repost without history gives nothing');
+
+post_event($pdo, [
+    'type' => 'wall_repost',
+    'event_id' => 'repost-1',
+    'group_id' => 10,
+    'secret' => 'secret-key',
+    'object' => [
+        'from_id' => 7,
+        'id' => 81,
+        'owner_id' => 7,
+        'copy_history' => [
+            ['id' => 4, 'owner_id' => -10],
+        ],
+    ],
+]);
+check(points_of($pdo, $contestId, 7) === 5, 'repost adds 2');
+
+post_event($pdo, [
+    'type' => 'wall_repost',
+    'event_id' => 'repost-2',
+    'group_id' => 10,
+    'secret' => 'secret-key',
+    'object' => [
+        'from_id' => 7,
+        'id' => 82,
+        'owner_id' => 7,
+        'copy_history' => [
+            ['id' => 9, 'owner_id' => -10],
+        ],
+    ],
+]);
+check(points_of($pdo, $contestId, 7) === 5, 'second repost does not add points');
 
 post_event($pdo, [
     'type' => 'like_add',
@@ -243,7 +276,7 @@ post_event($pdo, [
 
 $board = contest_leaderboard($pdo, $contestId);
 check(count($board) === 2, 'two people on the board');
-check((int) $board[0]['vk_user_id'] === 7 && (int) $board[0]['points'] === 3 && (int) $board[0]['place'] === 1, 'leader is user 7');
+check((int) $board[0]['vk_user_id'] === 7 && (int) $board[0]['points'] === 5 && (int) $board[0]['place'] === 1, 'leader is user 7');
 check((int) $board[1]['vk_user_id'] === 8 && (int) $board[1]['place'] === 2, 'second place is user 8');
 check($board[0]['first_name'] === 'Имя7', 'name stored from profile');
 
@@ -255,7 +288,7 @@ post_event($pdo, [
     'secret' => 'secret-key',
     'object' => ['liker_id' => 7, 'object_type' => 'post', 'object_owner_id' => -10, 'object_id' => 70],
 ]);
-check(points_of($pdo, $contestId, 7) === 3, 'finished contest does not accept new points');
+check(points_of($pdo, $contestId, 7) === 5, 'finished contest does not accept new points');
 
 $again = contest_start($pdo, ['title' => 'Второй', 'starts_at' => $start, 'ends_at' => $end]);
 check($again === null, 'second contest starts after finish');

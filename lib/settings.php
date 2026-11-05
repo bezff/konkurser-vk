@@ -40,6 +40,7 @@ function settings_points(array $settings, string $type): int
         'join' => 5,
         'like' => 1,
         'comment' => 2,
+        'repost' => 2,
     ];
     $raw = $settings['points_' . $type] ?? (string) ($defaults[$type] ?? 0);
     $value = (int) $raw;
@@ -101,7 +102,12 @@ function settings_save_connection(PDO $pdo, array $post): ?string
     }
 
     $points = [];
-    foreach (['join' => 'вступление', 'like' => 'лайк', 'comment' => 'комментарий'] as $key => $label) {
+    foreach ([
+        'join' => 'вступление',
+        'like' => 'лайк',
+        'comment' => 'комментарий',
+        'repost' => 'репост',
+    ] as $key => $label) {
         $parsed = settings_parse_points($post['points_' . $key] ?? null);
         if ($parsed === null) {
             return 'Баллы за ' . $label . ': целое число от 0 до 100. Ноль отключает действие.';
@@ -166,6 +172,7 @@ function settings_save_connection(PDO $pdo, array $post): ?string
         'points_join' => (string) $points['join'],
         'points_like' => (string) $points['like'],
         'points_comment' => (string) $points['comment'],
+        'points_repost' => (string) $points['repost'],
     ]);
 
     return null;

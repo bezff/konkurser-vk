@@ -30,7 +30,7 @@ function scoring_decide(string $type, array $object, int $groupId): array
         case 'wall_reply_edit':
             return scoring_ignore('edit');
         case 'wall_repost':
-            return scoring_ignore('repost');
+            return scoring_repost($object, $groupId);
         default:
             return scoring_ignore('unsupported');
     }
@@ -123,6 +123,35 @@ function scoring_comment(array $object, int $groupId): array
         'action' => 'award',
         'type' => 'comment',
         'key' => 'comment:' . $postOwner . ':' . $commentId,
+        'user_id' => $userId,
+    ];
+}
+
+function scoring_repost(array $object, int $groupId): array
+{
+    $userId = (int) ($object['from_id'] ?? 0);
+    if ($userId <= 0) {
+        return scoring_ignore('bad_payload');
+    }
+
+    $history = $object['copy_history'] ?? null;
+    if (!is_array($history) || $history === []) {
+        return scoring_ignore('bad_payload');
+    }
+    if (!array_key_exists(0, $history) || !is_array($history[0])) {
+        return scoring_ignore('bad_payload');
+    }
+    $original = $history[0];
+
+    $owner = (int) ($original['owner_id'] ?? 0);
+    if ($groupId <= 0 || $owner !== -$groupId) {
+        return scoring_ignore('not_group');
+    }
+
+    return [
+        'action' => 'award',
+        'type' => 'repost',
+        'key' => 'repost:' . $userId,
         'user_id' => $userId,
     ];
 }

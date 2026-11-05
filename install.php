@@ -98,6 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'points_join' => '5',
                 'points_like' => '1',
                 'points_comment' => '2',
+                'points_repost' => '2',
             ]);
             file_put_contents($dir . '/install.lock', app_now() . "\n");
             auth_mark_logged_in();
