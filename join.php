@@ -14,12 +14,20 @@ function join_render(
     string $groupName,
     string $state,
     string $message,
-    bool $needLaunchParams = false
+    bool $needLaunchParams = false,
+    string $inviteUrl = ''
 ): void {
     view_start($title, null, $groupName, true, $needLaunchParams);
     echo '<section class="panel join-panel">';
     echo '<h1>' . h($title) . '</h1>';
     echo '<p class="flash ' . h($state) . '" id="join-status" role="status">' . h($message) . '</p>';
+    if ($inviteUrl !== '') {
+        echo '<p class="lead">Отправьте ссылку другу. Когда он вступит в сообщество, баллы получите вы оба.</p>';
+        echo '<div class="copy-row">';
+        echo '<input id="invite-url" readonly value="' . h($inviteUrl) . '">';
+        echo '<button type="button" class="ghost" data-copy="invite-url">Скопировать</button>';
+        echo '</div>';
+    }
     echo '</section>';
     view_end(true);
 }
@@ -88,17 +96,41 @@ if ($contest === null) {
     exit;
 }
 
+$contestId = (int) $contest['id'];
+$contestOpen = $now < $contest['ends_at'];
+if ($contestOpen) {
+    $referrerId = 0;
+    if (isset($_GET['ref']) && is_string($_GET['ref']) && preg_match('/^\d+$/', $_GET['ref'])) {
+        $parsedRef = (int) $_GET['ref'];
+        $canonicalRef = ltrim($_GET['ref'], '0');
+        if ($parsedRef > 0 && (string) $parsedRef === $canonicalRef && $parsedRef !== $userId) {
+            $referrerId = $parsedRef;
+        }
+    }
+    if ($referrerId > 0) {
+        try {
+            referral_remember_click($pdo, $contestId, $userId, $referrerId, $now);
+        } catch (Throwable $e) {
+            app_log('referral click: ' . $e->getMessage());
+        }
+    }
+}
+
+$inviteUrl = $contestOpen ? contest_invite_url($settings, $userId) : '';
+
 if ((int) ($contest['require_accept'] ?? 0) !== 1) {
     join_render(
         'Принятие акции',
         $groupName,
         'ok',
-        'В этом конкурсе переход по ссылке не нужен. Лайки и комментарии уже учитываются.'
+        'В этом конкурсе переход по ссылке не нужен. Лайки и комментарии уже учитываются.',
+        false,
+        $inviteUrl
     );
     exit;
 }
 
-if ($now >= $contest['ends_at']) {
+if (!$contestOpen) {
     join_render('Принятие акции', $groupName, 'bad', 'Конкурс уже закончился.');
     exit;
 }
@@ -106,7 +138,7 @@ if ($now >= $contest['ends_at']) {
 $profile = vk_user_profile((string) ($settings['vk_access_token'] ?? ''), $userId);
 
 try {
-    $result = contest_accept($pdo, (int) $contest['id'], $userId, $now, $profile);
+    $result = contest_accept($pdo, $contestId, $userId, $now, $profile);
 } catch (Throwable $e) {
     app_log('accept: ' . $e->getMessage());
     join_render('Принятие акции', $groupName, 'bad', 'Не удалось сохранить принятие. Попробуйте ещё раз.');
@@ -118,7 +150,9 @@ if ($result['code'] === 'already') {
         'Акция принята',
         $groupName,
         'ok',
-        'Вы уже принимали участие. Лайки, комментарии и вступление учитываются в рейтинге.'
+        'Вы уже принимали участие. Лайки, комментарии и вступление учитываются в рейтинге.',
+        false,
+        $inviteUrl
     );
     exit;
 }
@@ -129,5 +163,7 @@ join_render(
     'ok',
     'Готово. Теперь ваши лайки, комментарии и вступление в сообщество учитываются в конкурсе «'
     . $contest['title']
-    . '».'
+    . '».',
+    false,
+    $inviteUrl
 );

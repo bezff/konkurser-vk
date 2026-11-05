@@ -36,6 +36,8 @@ function reset_tables(PDO $pdo): void
     foreach ([
         'actions',
         'acceptances',
+        'referral_clicks',
+        'referrals',
         'callback_events',
         'callback_log',
         'contests',

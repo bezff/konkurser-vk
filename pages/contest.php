@@ -61,6 +61,7 @@ if ($active !== null) {
     echo '<div><dt>Окончание</dt><dd>' . h(view_datetime($active['ends_at'])) . '</dd></div>';
     echo '<div><dt>Участники</dt><dd>' . (int) $stats['users'] . '</dd></div>';
     echo '<div><dt>Сумма баллов</dt><dd>' . (int) $stats['points'] . '</dd></div>';
+    echo '<div><dt>Приглашения</dt><dd>' . contest_referral_count($pdo, (int) $active['id']) . '</dd></div>';
     if ($requireAccept) {
         echo '<div><dt>Приняли акцию</dt><dd>' . contest_accept_count($pdo, (int) $active['id']) . '</dd></div>';
     }
@@ -71,7 +72,7 @@ if ($active !== null) {
     if ($requireAccept) {
         $acceptUrl = contest_accept_url($settings);
         echo '<h2>Ссылка для записи</h2>';
-        echo '<p class="lead">Вставьте её в пост конкурса. Пока человек не откроет ссылку внутри ВК, его лайки и комментарии в рейтинг не попадают.</p>';
+        echo '<p class="lead">Вставьте её в пост конкурса. Пока человек не откроет ссылку внутри ВК, его лайки и комментарии в рейтинг не попадают. Там же, внутри ВК, он копирует свою ссылку приглашения.</p>';
         if ($acceptUrl !== '') {
             echo '<div class="copy-row">';
             echo '<input id="accept-url" readonly value="' . h($acceptUrl) . '">';
@@ -79,6 +80,18 @@ if ($active !== null) {
             echo '</div>';
         } else {
             echo '<p class="flash bad">Мини-приложение не настроено. <a href="index.php?page=connect">Открыть подключение</a></p>';
+        }
+    } else {
+        $inviteUrl = contest_accept_url($settings);
+        if ($miniappReady && $inviteUrl !== '') {
+            echo '<h2>Ссылка для приглашения</h2>';
+            echo '<p class="lead">Поставьте эту ссылку в запись конкурса, чтобы участник открыл её и скопировал личное приглашение.</p>';
+            echo '<div class="copy-row">';
+            echo '<input id="invite-entry" readonly value="' . h($inviteUrl) . '">';
+            echo '<button type="button" class="ghost" data-copy="invite-entry">Скопировать</button>';
+            echo '</div>';
+        } elseif (!$miniappReady) {
+            echo '<p class="hint">Для приглашений нужно мини-приложение. <a href="index.php?page=connect">Открыть подключение</a></p>';
         }
     }
     echo '<div class="actions">';
@@ -129,6 +142,7 @@ echo '<li><strong>Вступление, ' . settings_points($settings, 'join') .
 echo '<li><strong>Лайк записи, ' . settings_points($settings, 'like') . '.</strong> Только отметка «Мне нравится» на записи стены сообщества. Лайк комментария, фото, видео или товара не считается. Снятие лайка забирает балл.</li>';
 echo '<li><strong>Комментарий, ' . settings_points($settings, 'comment') . '.</strong> Комментарий или ответ под записью стены сообщества. Удаление снимает баллы, восстановление возвращает их. Правка текста счёт не меняет. Комментарий от имени сообщества не считается.</li>';
 echo '<li><strong>Репост, ' . settings_points($settings, 'repost') . '.</strong> Репост записи стены этого сообщества считается один раз на человека за весь конкурс. Ещё один репост баллы не добавляет. Если репост удалить, баллы остаются.</li>';
+echo '<li><strong>Приглашение, ' . settings_points($settings, 'referral') . ' пригласившему и ' . settings_points($settings, 'referral_friend') . ' приглашённому.</strong> Участник открывает мини-приложение и копирует одну ссылку. Когда друг вступает в сообщество во время конкурса, баллы получают оба, один раз. Выход из сообщества эти баллы не снимает. Пригласить себя нельзя. Открытие ссылки без вступления баллы не даёт. Номер в ссылке ВК не подписывает, подделать ссылку можно; баллы ставятся только за реальное вступление, и каждый человек считается один раз.</li>';
 echo '<li><strong>Принятие по ссылке.</strong> Если при запуске включена галочка, баллы появляются только после открытия ссылки мини-приложения из записи. Действия до перехода сохраняются и засчитываются в момент принятия; снятие лайка или удаление комментария до принятия отменяет их.</li>';
 echo '</ul>';
 echo '<p class="hint">Повтор одного и того же действия не удваивает баллы. Ноль в настройках выключает действие. Уже поставленные баллы при смене настроек не пересчитываются. <a href="index.php?page=connect">Изменить баллы</a></p>';

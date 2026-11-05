@@ -78,6 +78,28 @@ function schema_ensure(PDO $pdo): void
             CONSTRAINT fk_acceptances_contest FOREIGN KEY (contest_id) REFERENCES contests (id)
          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
     );
+
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS referral_clicks (
+            contest_id BIGINT UNSIGNED NOT NULL,
+            vk_user_id BIGINT UNSIGNED NOT NULL,
+            referrer_vk_user_id BIGINT UNSIGNED NOT NULL,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (contest_id, vk_user_id),
+            CONSTRAINT fk_referral_clicks_contest FOREIGN KEY (contest_id) REFERENCES contests (id)
+         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS referrals (
+            contest_id BIGINT UNSIGNED NOT NULL,
+            referred_vk_user_id BIGINT UNSIGNED NOT NULL,
+            referrer_vk_user_id BIGINT UNSIGNED NOT NULL,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (contest_id, referred_vk_user_id),
+            CONSTRAINT fk_referrals_contest FOREIGN KEY (contest_id) REFERENCES contests (id)
+         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
 }
 
 function schema_has_column(PDO $pdo, string $table, string $column): bool

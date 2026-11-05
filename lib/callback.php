@@ -126,7 +126,8 @@ function callback_process(
         $eventId,
         $type,
         $requireAccept,
-        $userId
+        $userId,
+        $settings
     ): array {
         if ($eventId !== '') {
             if (!callback_remember($pdo, $eventId, $type, $now)) {
@@ -143,6 +144,19 @@ function callback_process(
         }
 
         $code = scoring_apply($pdo, $contestId, $decision, $points, $now, $profile, $awardStatus);
+        if (
+            $code === 'awarded'
+            && (string) ($decision['type'] ?? '') === 'join'
+            && (int) ($decision['user_id'] ?? 0) > 0
+        ) {
+            referral_credit_on_join(
+                $pdo,
+                $contestId,
+                (int) $decision['user_id'],
+                $now,
+                $settings
+            );
+        }
         $detail = '';
         if (
             ($code === 'awarded' || $code === 'revoked' || $code === 'held')
@@ -277,6 +291,8 @@ function callback_detail_label(string $detail): string
     }
     $map = [
         'repost' => 'репост',
+        'referral' => 'приглашение',
+        'referral_friend' => 'бонус приглашённому',
         'not_post' => 'не запись стены',
         'not_group' => 'не это сообщество',
         'join_pending' => 'только заявка',

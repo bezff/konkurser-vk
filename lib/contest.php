@@ -302,6 +302,88 @@ function contest_accept_url(array $settings): string
     return 'https://vk.com/app' . $appId . '_-' . $groupId;
 }
 
+function contest_invite_url(array $settings, int $userId): string
+{
+    $base = contest_accept_url($settings);
+    if ($base === '' || $userId <= 0) {
+        return '';
+    }
+    return $base . '?ref=' . $userId;
+}
+
+function referral_remember_click(PDO $pdo, int $contestId, int $userId, int $referrerId, string $now): void
+{
+    if ($userId <= 0 || $referrerId <= 0 || $referrerId === $userId) {
+        return;
+    }
+    $st = $pdo->prepare(
+        'INSERT INTO referral_clicks (contest_id, vk_user_id, referrer_vk_user_id, created_at)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE referrer_vk_user_id = ?, created_at = ?'
+    );
+    $st->execute([$contestId, $userId, $referrerId, $now, $referrerId, $now]);
+}
+
+function contest_referral_count(PDO $pdo, int $contestId): int
+{
+    $st = $pdo->prepare('SELECT COUNT(*) FROM referrals WHERE contest_id = ?');
+    $st->execute([$contestId]);
+    return (int) $st->fetchColumn();
+}
+
+function referral_credit_on_join(PDO $pdo, int $contestId, int $userId, string $now, array $settings): void
+{
+    if ($userId <= 0) {
+        return;
+    }
+
+    $st = $pdo->prepare(
+        'SELECT referrer_vk_user_id FROM referral_clicks WHERE contest_id = ? AND vk_user_id = ?'
+    );
+    $st->execute([$contestId, $userId]);
+    $referrerRaw = $st->fetchColumn();
+    if ($referrerRaw === false) {
+        return;
+    }
+    $referrerId = (int) $referrerRaw;
+    if ($referrerId <= 0 || $referrerId === $userId) {
+        return;
+    }
+
+    $ins = $pdo->prepare(
+        'INSERT INTO referrals (contest_id, referred_vk_user_id, referrer_vk_user_id, created_at)
+         VALUES (?, ?, ?, ?)'
+    );
+    try {
+        $ins->execute([$contestId, $userId, $referrerId, $now]);
+    } catch (PDOException $e) {
+        if ((string) $e->getCode() === '23000') {
+            return;
+        }
+        throw $e;
+    }
+
+    $inviterPoints = settings_points($settings, 'referral');
+    if ($inviterPoints > 0) {
+        scoring_apply($pdo, $contestId, [
+            'action' => 'award',
+            'user_id' => $referrerId,
+            'type' => 'referral',
+            'key' => 'referral:' . $referrerId . ':' . $userId,
+        ], $inviterPoints, $now, null, 'active');
+    }
+
+    $friendPoints = settings_points($settings, 'referral_friend');
+    if ($friendPoints > 0) {
+        scoring_apply($pdo, $contestId, [
+            'action' => 'award',
+            'user_id' => $userId,
+            'type' => 'referral_friend',
+            'key' => 'referral_friend:' . $userId,
+        ], $friendPoints, $now, null, 'active');
+    }
+}
+
 /**
  * @return array{code:string,detail:string}
  */
@@ -337,6 +419,16 @@ function contest_accept(PDO $pdo, int $contestId, int $userId, string $now, ?arr
                  WHERE contest_id = ? AND vk_user_id = ? AND status = 'held'"
             );
             $upd->execute([$now, $contestId, $userId]);
+
+            $joinActive = $pdo->prepare(
+                "SELECT 1 FROM actions
+                 WHERE contest_id = ? AND vk_user_id = ? AND action_type = 'join' AND status = 'active'
+                 LIMIT 1"
+            );
+            $joinActive->execute([$contestId, $userId]);
+            if ($joinActive->fetchColumn()) {
+                referral_credit_on_join($pdo, $contestId, $userId, $now, settings_all($pdo));
+            }
 
             participant_save($pdo, $userId, $profile, $now);
 

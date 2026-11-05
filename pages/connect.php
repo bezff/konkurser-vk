@@ -90,8 +90,10 @@ echo '<div><label for="points_comment">Баллы за комментарий</l
 echo '</div>';
 echo '<div class="grid-3">';
 echo '<div><label for="points_repost">Баллы за репост</label><input id="points_repost" name="points_repost" inputmode="numeric" required value="' . settings_points($settings, 'repost') . '"></div>';
+echo '<div><label for="points_referral">Баллы пригласившему</label><input id="points_referral" name="points_referral" inputmode="numeric" required value="' . settings_points($settings, 'referral') . '"></div>';
+echo '<div><label for="points_referral_friend">Баллы приглашённому</label><input id="points_referral_friend" name="points_referral_friend" inputmode="numeric" required value="' . settings_points($settings, 'referral_friend') . '"></div>';
 echo '</div>';
-echo '<p class="hint">Целое число от 0 до 100. Ноль выключает действие для новых событий.</p>';
+echo '<p class="hint">Целое число от 0 до 100. Ноль выключает действие для новых событий. Баллы за приглашение работают только после сохранения ID и ключа мини-приложения. Участник копирует личную ссылку внутри мини-приложения. Баллы добавляются, когда друг вступает.</p>';
 echo '<button type="submit">Сохранить и проверить</button>';
 echo '</form></section>';
 
@@ -103,7 +105,7 @@ echo '<div class="copy-row">';
 echo '<input id="join-url" readonly value="' . h($joinUrl) . '">';
 echo '<button type="button" class="ghost" data-copy="join-url">Скопировать</button>';
 echo '</div>';
-echo '<p class="hint">Ссылку для записи конкурса вида vk.com/app…_-… смотрите на странице «Конкурс» после запуска с галочкой принятия.</p>';
+echo '<p class="hint">Ссылку вида vk.com/app…_-… для записи конкурса смотрите на странице «Конкурс», когда конкурс уже запущен.</p>';
 echo '</section>';
 
 echo '<section class="panel">';

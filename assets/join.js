@@ -9,6 +9,38 @@
   var needParams = body.getAttribute("data-need-params") === "1";
   var statusNode = document.getElementById("join-status");
 
+  document.querySelectorAll("[data-copy]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      var input = document.getElementById(button.getAttribute("data-copy") || "");
+      if (!input) {
+        return;
+      }
+      var original = button.textContent;
+      var failed = function () {
+        input.focus();
+        input.select();
+        button.textContent = "Выделите и скопируйте";
+      };
+      try {
+        if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
+          failed();
+        } else {
+          navigator.clipboard
+            .writeText(input.value)
+            .then(function () {
+              button.textContent = "Скопировано";
+            })
+            .catch(failed);
+        }
+      } catch (e) {
+        failed();
+      }
+      window.setTimeout(function () {
+        button.textContent = original;
+      }, 1600);
+    });
+  });
+
   function setStatus(text) {
     if (statusNode && text) {
       statusNode.textContent = text;
@@ -52,6 +84,37 @@
     return parts.join("&");
   }
 
+  function refParam() {
+    var sources = [window.location.search, window.location.hash];
+    var i;
+    var j;
+    for (i = 0; i < sources.length; i++) {
+      var raw = sources[i];
+      if (!raw) {
+        continue;
+      }
+      if (raw.charAt(0) === "?" || raw.charAt(0) === "#") {
+        raw = raw.slice(1);
+      }
+      var parts = raw.split("&");
+      for (j = 0; j < parts.length; j++) {
+        var pair = parts[j].split("=");
+        var key = "";
+        var value = "";
+        try {
+          key = decodeURIComponent(pair[0] || "");
+          value = decodeURIComponent(pair.slice(1).join("=") || "");
+        } catch (e) {
+          continue;
+        }
+        if (key === "ref" && /^[1-9]\d*$/.test(value)) {
+          return value;
+        }
+      }
+    }
+    return "";
+  }
+
   loadBridge(function (bridge) {
     bridge
       .send("VKWebAppInit")
@@ -71,6 +134,10 @@
           return;
         }
         var query = toQuery(data);
+        var ref = refParam();
+        if (ref) {
+          query = query ? query + "&ref=" + encodeURIComponent(ref) : "ref=" + encodeURIComponent(ref);
+        }
         var next = window.location.pathname + (query ? "?" + query : "");
         window.location.replace(next);
       })

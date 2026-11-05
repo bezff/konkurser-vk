@@ -41,6 +41,8 @@ function settings_points(array $settings, string $type): int
         'like' => 1,
         'comment' => 2,
         'repost' => 2,
+        'referral' => 5,
+        'referral_friend' => 5,
     ];
     $raw = $settings['points_' . $type] ?? (string) ($defaults[$type] ?? 0);
     $value = (int) $raw;
@@ -107,6 +109,8 @@ function settings_save_connection(PDO $pdo, array $post): ?string
         'like' => 'лайк',
         'comment' => 'комментарий',
         'repost' => 'репост',
+        'referral' => 'приглашение',
+        'referral_friend' => 'бонус приглашённому',
     ] as $key => $label) {
         $parsed = settings_parse_points($post['points_' . $key] ?? null);
         if ($parsed === null) {
@@ -173,6 +177,8 @@ function settings_save_connection(PDO $pdo, array $post): ?string
         'points_like' => (string) $points['like'],
         'points_comment' => (string) $points['comment'],
         'points_repost' => (string) $points['repost'],
+        'points_referral' => (string) $points['referral'],
+        'points_referral_friend' => (string) $points['referral_friend'],
     ]);
 
     return null;
