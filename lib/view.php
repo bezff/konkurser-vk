@@ -41,8 +41,8 @@ function view_start(
         // frame-ancestors * — иначе часть клиентов ВК режет узкий список доменов.
         header(
             "Content-Security-Policy: default-src 'self'; style-src 'self'; "
-            . "script-src 'self' https://unpkg.com https://cdn.jsdelivr.net; "
-            . "connect-src 'self' https://api.vk.com https://stat.vk-portal.net https://unpkg.com https://cdn.jsdelivr.net; "
+            .             "script-src 'self' https://cdn.jsdelivr.net; "
+            . "connect-src 'self' https://api.vk.com https://stat.vk-portal.net; "
             . "base-uri 'none'; form-action 'self'; frame-ancestors *"
         );
     } else {

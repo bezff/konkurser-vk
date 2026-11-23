@@ -96,7 +96,13 @@ function callback_process(
     }
 
     $points = settings_points($settings, (string) $decision['type']);
-    if ($decision['action'] === 'award' && $points <= 0) {
+    $referralOnJoin = $decision['action'] === 'award'
+        && (string) ($decision['type'] ?? '') === 'join'
+        && (
+            settings_points($settings, 'referral') > 0
+            || settings_points($settings, 'referral_friend') > 0
+        );
+    if ($decision['action'] === 'award' && $points <= 0 && !$referralOnJoin) {
         return ['code' => 'disabled', 'detail' => (string) $decision['type']];
     }
 
@@ -117,6 +123,27 @@ function callback_process(
     $contestId = (int) $contest['id'];
     $requireAccept = (int) ($contest['require_accept'] ?? 0) === 1;
 
+    $inviter = null;
+    if (
+        $referralOnJoin
+        && $userId > 0
+        && !($requireAccept && !contest_has_accepted($pdo, $contestId, $userId))
+    ) {
+        $token = (string) ($settings['vk_access_token'] ?? '');
+        $inviter = referral_inviter_profile(
+            $pdo,
+            $contestId,
+            $userId,
+            static function (int $id) use ($profiles, $token): ?array {
+                if ($profiles !== null) {
+                    $loaded = $profiles($id);
+                    return is_array($loaded) ? $loaded : null;
+                }
+                return vk_user_profile($token, $id);
+            }
+        );
+    }
+
     $run = function (PDO $pdo) use (
         $contestId,
         $decision,
@@ -127,7 +154,8 @@ function callback_process(
         $type,
         $requireAccept,
         $userId,
-        $settings
+        $settings,
+        $inviter
     ): array {
         if ($eventId !== '') {
             if (!callback_remember($pdo, $eventId, $type, $now)) {
@@ -143,6 +171,14 @@ function callback_process(
             }
         }
 
+        if (
+            $decision['action'] === 'award'
+            && $points <= 0
+            && referral_pending_referrer($pdo, $contestId, (int) ($decision['user_id'] ?? 0)) <= 0
+        ) {
+            return ['code' => 'disabled', 'detail' => (string) $decision['type']];
+        }
+
         $code = scoring_apply($pdo, $contestId, $decision, $points, $now, $profile, $awardStatus);
         if (
             $code === 'awarded'
@@ -154,7 +190,8 @@ function callback_process(
                 $contestId,
                 (int) $decision['user_id'],
                 $now,
-                $settings
+                $settings,
+                $inviter
             );
         }
         $detail = '';

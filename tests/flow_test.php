@@ -227,7 +227,7 @@ post_event($pdo, [
     'secret' => 'secret-key',
     'object' => ['from_id' => 7, 'id' => 80, 'owner_id' => 7],
 ]);
-check(points_of($pdo, $contestId, 7) === 3, 'repost without history gives nothing');
+check(points_of($pdo, $contestId, 7) === 5, 'repost without history adds 2');
 
 post_event($pdo, [
     'type' => 'wall_repost',
@@ -243,7 +243,7 @@ post_event($pdo, [
         ],
     ],
 ]);
-check(points_of($pdo, $contestId, 7) === 5, 'repost adds 2');
+check(points_of($pdo, $contestId, 7) === 5, 'history on the same user does not add again');
 
 post_event($pdo, [
     'type' => 'wall_repost',

@@ -41,6 +41,31 @@
     });
   });
 
+  document.querySelectorAll("[data-share]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      var input = document.getElementById(button.getAttribute("data-share") || "");
+      if (!input || !input.value) {
+        return;
+      }
+      var original = button.textContent;
+      loadBridge(function (bridge) {
+        bridge
+          .send("VKWebAppShare", { link: input.value })
+          .then(function () {
+            button.textContent = "Открыто";
+          })
+          .catch(function () {
+            input.focus();
+            input.select();
+            button.textContent = "Скопируйте ссылку";
+          });
+      });
+      window.setTimeout(function () {
+        button.textContent = original;
+      }, 1600);
+    });
+  });
+
   function setStatus(text) {
     if (statusNode && text) {
       statusNode.textContent = text;
@@ -52,20 +77,35 @@
       done(window.vkBridge);
       return;
     }
-    var script = document.createElement("script");
-    script.src = "https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js";
-    script.async = true;
-    script.onload = function () {
+    var sources = [
+      "assets/vk-bridge.min.js",
+      "https://cdn.jsdelivr.net/npm/@vkontakte/vk-bridge@2.15.6/dist/browser.min.js"
+    ];
+    function loadAt(index) {
       if (window.vkBridge && typeof window.vkBridge.send === "function") {
         done(window.vkBridge);
         return;
       }
-      setStatus("Не удалось подключить VK Bridge. Откройте ссылку внутри ВК.");
-    };
-    script.onerror = function () {
-      setStatus("Не удалось загрузить VK Bridge. Проверьте интернет и откройте ссылку внутри ВК.");
-    };
-    document.head.appendChild(script);
+      if (index >= sources.length) {
+        setStatus("Не удалось подключить VK Bridge. Откройте ссылку внутри ВК.");
+        return;
+      }
+      var script = document.createElement("script");
+      script.src = sources[index];
+      script.async = true;
+      script.onload = function () {
+        if (window.vkBridge && typeof window.vkBridge.send === "function") {
+          done(window.vkBridge);
+          return;
+        }
+        loadAt(index + 1);
+      };
+      script.onerror = function () {
+        loadAt(index + 1);
+      };
+      document.head.appendChild(script);
+    }
+    loadAt(0);
   }
 
   function paramsFromSearch() {
@@ -84,35 +124,68 @@
     return parts.join("&");
   }
 
-  function refParam() {
-    var sources = [window.location.search, window.location.hash];
-    var i;
+  function validRef(value) {
+    return /^[1-9]\d*$/.test(value) ? value : "";
+  }
+
+  function refFromBlob(raw) {
+    if (!raw) {
+      return "";
+    }
+    var text = String(raw);
+    if (text.charAt(0) === "?" || text.charAt(0) === "#") {
+      text = text.slice(1);
+    }
+    var whole = validRef(text);
+    if (whole) {
+      return whole;
+    }
+    var parts = text.split("&");
     var j;
-    for (i = 0; i < sources.length; i++) {
-      var raw = sources[i];
-      if (!raw) {
+    for (j = 0; j < parts.length; j++) {
+      var pair = parts[j].split("=");
+      var key = "";
+      var value = "";
+      try {
+        key = decodeURIComponent(pair[0] || "");
+        value = decodeURIComponent(pair.slice(1).join("=") || "");
+      } catch (e) {
         continue;
       }
-      if (raw.charAt(0) === "?" || raw.charAt(0) === "#") {
-        raw = raw.slice(1);
-      }
-      var parts = raw.split("&");
-      for (j = 0; j < parts.length; j++) {
-        var pair = parts[j].split("=");
-        var key = "";
-        var value = "";
-        try {
-          key = decodeURIComponent(pair[0] || "");
-          value = decodeURIComponent(pair.slice(1).join("=") || "");
-        } catch (e) {
-          continue;
+      if (key === "hash") {
+        var nested = refFromBlob(value);
+        if (nested) {
+          return nested;
         }
-        if (key === "ref" && /^[1-9]\d*$/.test(value)) {
-          return value;
+      }
+      if (key === "ref" || key === "vk_ref") {
+        var found = validRef(value);
+        if (found) {
+          return found;
         }
       }
     }
     return "";
+  }
+
+  function refParam() {
+    return refFromBlob(window.location.search) || refFromBlob(window.location.hash);
+  }
+
+  function appendRef(query, ref) {
+    if (!ref || refFromBlob(query)) {
+      return query;
+    }
+    return query ? query + "&ref=" + encodeURIComponent(ref) : "ref=" + encodeURIComponent(ref);
+  }
+
+  var earlyRef = refParam();
+  if (earlyRef && !refFromBlob(window.location.search)) {
+    var glue = window.location.search ? "&" : "?";
+    window.location.replace(
+      window.location.pathname + window.location.search + glue + "ref=" + encodeURIComponent(earlyRef)
+    );
+    return;
   }
 
   loadBridge(function (bridge) {
@@ -135,9 +208,13 @@
         }
         var query = toQuery(data);
         var ref = refParam();
-        if (ref) {
-          query = query ? query + "&ref=" + encodeURIComponent(ref) : "ref=" + encodeURIComponent(ref);
+        if (!ref && data.hash) {
+          ref = refFromBlob(String(data.hash));
         }
+        if (!ref && data.vk_ref) {
+          ref = validRef(String(data.vk_ref));
+        }
+        query = appendRef(query, ref);
         var next = window.location.pathname + (query ? "?" + query : "");
         window.location.replace(next);
       })

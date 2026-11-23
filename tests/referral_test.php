@@ -97,7 +97,7 @@ function action_rows(PDO $pdo, int $contestId, string $type): int
 }
 
 check(
-    contest_invite_url(['vk_app_id' => '15', 'vk_group_id' => '10'], 77) === 'https://vk.com/app15_-10?ref=77',
+    contest_invite_url(['vk_app_id' => '15', 'vk_group_id' => '10'], 77) === 'https://vk.com/app15_-10?ref=77#ref=77',
     'invite url uses app and group'
 );
 check(contest_invite_url(['vk_app_id' => '', 'vk_group_id' => '10'], 77) === '', 'invite url needs app id');
@@ -145,6 +145,9 @@ check(points_of_type($pdo, $contestId, 200, 'join') === 5, 'friend join points a
 check(points_of_type($pdo, $contestId, 200, 'referral_friend') === 3, 'friend bonus is 3');
 check(points_of($pdo, $contestId, 100) === 4, 'inviter gets 4');
 check(points_of_type($pdo, $contestId, 100, 'referral') === 4, 'inviter points are referral');
+$inviterName = $pdo->prepare('SELECT first_name FROM participants WHERE vk_user_id = 100');
+$inviterName->execute();
+check((string) $inviterName->fetchColumn() === 'Имя100', 'inviter name is stored');
 check(contest_referral_count($pdo, $contestId) === 1, 'one referrals row');
 
 $again = post_event($pdo, [
@@ -312,6 +315,30 @@ post_event($pdo, [
 check(points_of($pdo, $zeroId, 900) === 5, 'later settings do not pay the friend on rejoin');
 check(points_of($pdo, $zeroId, 901) === 0, 'later settings do not pay the inviter on rejoin');
 check(contest_referral_count($pdo, $zeroId) === 1, 'rejoin after a zero credit stays one row');
+
+check(contest_finish($pdo) === null, 'finish zero contest');
+settings_set_many($pdo, [
+    'points_join' => '0',
+    'points_referral' => '4',
+    'points_referral_friend' => '3',
+]);
+check(
+    contest_start($pdo, ['title' => 'Вступление без баллов', 'starts_at' => $start, 'ends_at' => $end]) === null,
+    'start contest with zero join points'
+);
+$noJoinId = (int) contest_find_active($pdo)['id'];
+referral_remember_click($pdo, $noJoinId, 910, 911, app_now());
+post_event($pdo, [
+    'type' => 'group_join',
+    'event_id' => 'zero-join-points',
+    'group_id' => 10,
+    'secret' => 'secret-key',
+    'object' => ['user_id' => 910, 'join_type' => 'join'],
+]);
+check(points_of($pdo, $noJoinId, 910) === 3, 'zero join still pays the friend bonus');
+check(points_of_type($pdo, $noJoinId, 910, 'join') === 0, 'zero join stores no join points');
+check(points_of($pdo, $noJoinId, 911) === 4, 'zero join still pays the inviter');
+check(contest_referral_count($pdo, $noJoinId) === 1, 'zero join still creates a referral');
 
 if ($failed > 0) {
     ob_end_flush();

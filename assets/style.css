@@ -274,6 +274,10 @@ button.danger:hover { background: #74281e; }
   font-variant-numeric: tabular-nums;
 }
 
+.score-lines {
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+}
+
 .grid-2, .grid-3 {
   display: grid;
   gap: 12px;
@@ -417,6 +421,7 @@ tbody tr:hover { background: #f8f5ef; }
   .top-row { align-items: flex-start; flex-wrap: wrap; }
   .nav { margin-left: 0; width: 100%; }
   .facts, .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  .score-lines { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); }
   .inline-form { align-items: stretch; }
   .inline-form select, .inline-form button { width: 100%; }
   th, td { padding: 8px 6px; }

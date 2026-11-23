@@ -66,6 +66,14 @@ if ($active !== null) {
         echo '<div><dt>Приняли акцию</dt><dd>' . contest_accept_count($pdo, (int) $active['id']) . '</dd></div>';
     }
     echo '</dl>';
+    $parts = contest_action_totals($pdo, (int) $active['id']);
+    if ($parts !== []) {
+        $bits = [];
+        foreach ($parts as $line) {
+            $bits[] = $line['label'] . ' ' . $line['points'];
+        }
+        echo '<p class="hint">' . h(implode(' · ', $bits)) . '</p>';
+    }
     if ($state['class'] === 'is-wait') {
         echo '<p class="hint">Начисление начнётся в указанное время. До этого события приходят, но баллы не ставятся.</p>';
     }

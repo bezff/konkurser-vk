@@ -131,20 +131,20 @@ function scoring_repost(array $object, int $groupId): array
 {
     $userId = (int) ($object['from_id'] ?? 0);
     if ($userId <= 0) {
+        $wallOwner = (int) ($object['owner_id'] ?? 0);
+        if ($wallOwner > 0) {
+            $userId = $wallOwner;
+        }
+    }
+    if ($userId <= 0) {
         return scoring_ignore('bad_payload');
+    }
+    if ($groupId <= 0) {
+        return scoring_ignore('not_group');
     }
 
-    $history = $object['copy_history'] ?? null;
-    if (!is_array($history) || $history === []) {
-        return scoring_ignore('bad_payload');
-    }
-    if (!array_key_exists(0, $history) || !is_array($history[0])) {
-        return scoring_ignore('bad_payload');
-    }
-    $original = $history[0];
-
-    $owner = (int) ($original['owner_id'] ?? 0);
-    if ($groupId <= 0 || $owner !== -$groupId) {
+    $owners = scoring_repost_owners($object);
+    if ($owners !== [] && !in_array(-$groupId, $owners, true)) {
         return scoring_ignore('not_group');
     }
 
@@ -154,6 +154,76 @@ function scoring_repost(array $object, int $groupId): array
         'key' => 'repost:' . $userId,
         'user_id' => $userId,
     ];
+}
+
+function scoring_repost_owners(array $node, int $depth = 0): array
+{
+    if ($depth > 5) {
+        return [];
+    }
+
+    $owners = [];
+    $copied = (int) ($node['copy_owner_id'] ?? 0);
+    if ($copied !== 0) {
+        $owners[] = $copied;
+    }
+
+    $history = $node['copy_history'] ?? null;
+    if (is_array($history)) {
+        foreach (scoring_repost_items($history) as $item) {
+            $owner = (int) ($item['owner_id'] ?? 0);
+            if ($owner !== 0) {
+                $owners[] = $owner;
+            }
+            $from = (int) ($item['from_id'] ?? 0);
+            if ($from < 0) {
+                $owners[] = $from;
+            }
+            foreach (scoring_repost_owners($item, $depth + 1) as $nested) {
+                $owners[] = $nested;
+            }
+        }
+    }
+
+    $attachments = $node['attachments'] ?? null;
+    if (is_array($attachments)) {
+        foreach ($attachments as $attachment) {
+            if (!is_array($attachment) || ($attachment['type'] ?? '') !== 'wall') {
+                continue;
+            }
+            $wall = $attachment['wall'] ?? null;
+            if (!is_array($wall)) {
+                continue;
+            }
+            $owner = (int) ($wall['owner_id'] ?? 0);
+            if ($owner !== 0) {
+                $owners[] = $owner;
+            }
+            $from = (int) ($wall['from_id'] ?? 0);
+            if ($from < 0) {
+                $owners[] = $from;
+            }
+        }
+    }
+
+    return $owners;
+}
+
+function scoring_repost_items(array $history): array
+{
+    if ($history === []) {
+        return [];
+    }
+    if (array_key_exists('owner_id', $history) || array_key_exists('from_id', $history) || array_key_exists('id', $history)) {
+        return [$history];
+    }
+    $items = [];
+    foreach ($history as $item) {
+        if (is_array($item)) {
+            $items[] = $item;
+        }
+    }
+    return $items;
 }
 
 function scoring_comment_delete(array $object, int $groupId): array
@@ -287,6 +357,59 @@ function vk_launch_verify(array $params, string $appSecret, int $expectedAppId, 
     ];
 }
 
+function referral_id_from_launch(array $query, int $userId): int
+{
+    $candidates = [];
+    if (isset($query['ref']) && is_scalar($query['ref'])) {
+        $candidates[] = (string) $query['ref'];
+    }
+    if (isset($query['hash']) && is_scalar($query['hash'])) {
+        $fromHash = referral_ref_in_fragment((string) $query['hash']);
+        if ($fromHash !== '') {
+            $candidates[] = $fromHash;
+        }
+    }
+    if (isset($query['vk_ref']) && is_scalar($query['vk_ref'])) {
+        $candidates[] = (string) $query['vk_ref'];
+    }
+
+    foreach ($candidates as $raw) {
+        $id = referral_positive_id($raw, $userId);
+        if ($id > 0) {
+            return $id;
+        }
+    }
+    return 0;
+}
+
+function referral_ref_in_fragment(string $fragment): string
+{
+    $fragment = rawurldecode($fragment);
+    if ($fragment !== '' && ($fragment[0] === '#' || $fragment[0] === '?')) {
+        $fragment = substr($fragment, 1);
+    }
+    if (preg_match('/^\d+$/', $fragment) === 1) {
+        return $fragment;
+    }
+    if (preg_match('/(?:^|&)ref=(\d+)/', $fragment, $match) === 1) {
+        return $match[1];
+    }
+    return '';
+}
+
+function referral_positive_id(string $raw, int $userId): int
+{
+    if (preg_match('/^\d+$/', $raw) !== 1) {
+        return 0;
+    }
+    $parsed = (int) $raw;
+    $canonical = ltrim($raw, '0');
+    if ($parsed <= 0 || (string) $parsed !== $canonical || $parsed === $userId) {
+        return 0;
+    }
+    return $parsed;
+}
+
 function contest_window_open(string $status, string $startsAt, string $endsAt, string $now): string
 {
     if ($status !== 'active') {
@@ -316,6 +439,38 @@ function scoring_places(array $rows): array
         $rows[$index]['place'] = $place;
     }
     return $rows;
+}
+
+function scoring_rank_place(int $points, int $better): ?int
+{
+    if ($points <= 0) {
+        return null;
+    }
+    if ($better < 0) {
+        $better = 0;
+    }
+    return $better + 1;
+}
+
+function contest_score_lines(array $sums): array
+{
+    $order = [
+        'join' => 'Вступление',
+        'like' => 'Лайки',
+        'comment' => 'Комментарии',
+        'repost' => 'Репосты',
+        'referral' => 'Приглашения',
+        'referral_friend' => 'Бонус приглашённому',
+    ];
+    $lines = [];
+    foreach ($order as $type => $label) {
+        $points = (int) ($sums[$type] ?? 0);
+        if ($points <= 0) {
+            continue;
+        }
+        $lines[] = ['label' => $label, 'points' => $points];
+    }
+    return $lines;
 }
 
 function csv_cell(string $value): string

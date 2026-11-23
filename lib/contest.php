@@ -308,7 +308,7 @@ function contest_invite_url(array $settings, int $userId): string
     if ($base === '' || $userId <= 0) {
         return '';
     }
-    return $base . '?ref=' . $userId;
+    return $base . '?ref=' . $userId . '#ref=' . $userId;
 }
 
 function referral_remember_click(PDO $pdo, int $contestId, int $userId, int $referrerId, string $now): void
@@ -331,22 +331,144 @@ function contest_referral_count(PDO $pdo, int $contestId): int
     return (int) $st->fetchColumn();
 }
 
-function referral_credit_on_join(PDO $pdo, int $contestId, int $userId, string $now, array $settings): void
+function contest_user_points(PDO $pdo, int $contestId, int $userId): int
 {
-    if ($userId <= 0) {
-        return;
+    if ($contestId <= 0 || $userId <= 0) {
+        return 0;
+    }
+    $st = $pdo->prepare(
+        "SELECT COALESCE(SUM(points), 0) FROM actions
+         WHERE contest_id = ? AND vk_user_id = ? AND status = 'active'"
+    );
+    $st->execute([$contestId, $userId]);
+    return (int) $st->fetchColumn();
+}
+
+function contest_user_card(PDO $pdo, int $contestId, int $userId): array
+{
+    $empty = ['points' => 0, 'place' => null, 'lines' => []];
+    if ($contestId <= 0 || $userId <= 0) {
+        return $empty;
     }
 
+    $st = $pdo->prepare(
+        "SELECT action_type, COALESCE(SUM(points), 0) AS points
+         FROM actions
+         WHERE contest_id = ? AND vk_user_id = ? AND status = 'active'
+         GROUP BY action_type"
+    );
+    $st->execute([$contestId, $userId]);
+    $sums = [];
+    $total = 0;
+    foreach ($st->fetchAll() as $row) {
+        $points = (int) $row['points'];
+        $sums[(string) $row['action_type']] = $points;
+        $total += $points;
+    }
+
+    $place = null;
+    if ($total > 0) {
+        $better = $pdo->prepare(
+            "SELECT COUNT(*) FROM (
+                SELECT vk_user_id
+                FROM actions
+                WHERE contest_id = ? AND status = 'active'
+                GROUP BY vk_user_id
+                HAVING SUM(points) > ?
+            ) ranked"
+        );
+        $better->execute([$contestId, $total]);
+        $place = scoring_rank_place($total, (int) $better->fetchColumn());
+    }
+
+    return [
+        'points' => $total,
+        'place' => $place,
+        'lines' => contest_score_lines($sums),
+    ];
+}
+
+function contest_action_totals(PDO $pdo, int $contestId): array
+{
+    $st = $pdo->prepare(
+        "SELECT action_type, COALESCE(SUM(points), 0) AS points
+         FROM actions
+         WHERE contest_id = ? AND status = 'active'
+         GROUP BY action_type"
+    );
+    $st->execute([$contestId]);
+    $sums = [];
+    foreach ($st->fetchAll() as $row) {
+        $sums[(string) $row['action_type']] = (int) $row['points'];
+    }
+    return contest_score_lines($sums);
+}
+
+function referral_pending_referrer(PDO $pdo, int $contestId, int $userId): int
+{
+    if ($userId <= 0) {
+        return 0;
+    }
     $st = $pdo->prepare(
         'SELECT referrer_vk_user_id FROM referral_clicks WHERE contest_id = ? AND vk_user_id = ?'
     );
     $st->execute([$contestId, $userId]);
-    $referrerRaw = $st->fetchColumn();
-    if ($referrerRaw === false) {
-        return;
+    $raw = $st->fetchColumn();
+    if ($raw === false) {
+        return 0;
     }
-    $referrerId = (int) $referrerRaw;
+    $referrerId = (int) $raw;
     if ($referrerId <= 0 || $referrerId === $userId) {
+        return 0;
+    }
+    return $referrerId;
+}
+
+function participant_has_name(PDO $pdo, int $userId): bool
+{
+    if ($userId <= 0) {
+        return false;
+    }
+    $st = $pdo->prepare('SELECT first_name, last_name FROM participants WHERE vk_user_id = ?');
+    $st->execute([$userId]);
+    $row = $st->fetch();
+    if (!$row) {
+        return false;
+    }
+    return (string) $row['first_name'] !== '' || (string) $row['last_name'] !== '';
+}
+
+function referral_inviter_profile(PDO $pdo, int $contestId, int $userId, callable $load): ?array
+{
+    $referrerId = referral_pending_referrer($pdo, $contestId, $userId);
+    if ($referrerId <= 0 || participant_has_name($pdo, $referrerId)) {
+        return null;
+    }
+    $profile = $load($referrerId);
+    if (!is_array($profile)) {
+        return null;
+    }
+    $first = trim((string) ($profile['first_name'] ?? ''));
+    $last = trim((string) ($profile['last_name'] ?? ''));
+    if ($first === '' && $last === '') {
+        return null;
+    }
+    return [
+        'id' => $referrerId,
+        'profile' => ['first_name' => $first, 'last_name' => $last],
+    ];
+}
+
+function referral_credit_on_join(
+    PDO $pdo,
+    int $contestId,
+    int $userId,
+    string $now,
+    array $settings,
+    ?array $inviter = null
+): void {
+    $referrerId = referral_pending_referrer($pdo, $contestId, $userId);
+    if ($referrerId <= 0) {
         return;
     }
 
@@ -364,13 +486,21 @@ function referral_credit_on_join(PDO $pdo, int $contestId, int $userId, string $
     }
 
     $inviterPoints = settings_points($settings, 'referral');
+    $inviterProfile = null;
+    if (
+        is_array($inviter)
+        && (int) ($inviter['id'] ?? 0) === $referrerId
+        && is_array($inviter['profile'] ?? null)
+    ) {
+        $inviterProfile = $inviter['profile'];
+    }
     if ($inviterPoints > 0) {
         scoring_apply($pdo, $contestId, [
             'action' => 'award',
             'user_id' => $referrerId,
             'type' => 'referral',
             'key' => 'referral:' . $referrerId . ':' . $userId,
-        ], $inviterPoints, $now, null, 'active');
+        ], $inviterPoints, $now, $inviterProfile, 'active');
     }
 
     $friendPoints = settings_points($settings, 'referral_friend');
@@ -387,8 +517,14 @@ function referral_credit_on_join(PDO $pdo, int $contestId, int $userId, string $
 /**
  * @return array{code:string,detail:string}
  */
-function contest_accept(PDO $pdo, int $contestId, int $userId, string $now, ?array $profile): array
-{
+function contest_accept(
+    PDO $pdo,
+    int $contestId,
+    int $userId,
+    string $now,
+    ?array $profile,
+    ?array $inviter = null
+): array {
     if ($userId <= 0) {
         return ['code' => 'ignored', 'detail' => 'bad_user'];
     }
@@ -396,7 +532,7 @@ function contest_accept(PDO $pdo, int $contestId, int $userId, string $now, ?arr
     $lock = contest_user_lock_name($contestId, $userId);
     db_lock($pdo, $lock);
     try {
-        return db_transaction($pdo, function (PDO $pdo) use ($contestId, $userId, $now, $profile): array {
+        return db_transaction($pdo, function (PDO $pdo) use ($contestId, $userId, $now, $profile, $inviter): array {
             if (contest_has_accepted($pdo, $contestId, $userId)) {
                 return ['code' => 'already', 'detail' => (string) $userId];
             }
@@ -427,7 +563,7 @@ function contest_accept(PDO $pdo, int $contestId, int $userId, string $now, ?arr
             );
             $joinActive->execute([$contestId, $userId]);
             if ($joinActive->fetchColumn()) {
-                referral_credit_on_join($pdo, $contestId, $userId, $now, settings_all($pdo));
+                referral_credit_on_join($pdo, $contestId, $userId, $now, settings_all($pdo), $inviter);
             }
 
             participant_save($pdo, $userId, $profile, $now);

@@ -105,17 +105,24 @@
         return;
       }
       var original = button.textContent;
-      navigator.clipboard
-        .writeText(input.value)
-        .then(function () {
-          button.textContent = "Скопировано";
-          showToast("ok", "Скопировано в буфер обмена.");
-        })
-        .catch(function () {
-          input.focus();
-          input.select();
-          button.textContent = "Выделите и скопируйте";
-        });
+      var done = function () {
+        button.textContent = "Скопировано";
+        showToast("ok", "Скопировано в буфер обмена.");
+      };
+      var failed = function () {
+        input.focus();
+        input.select();
+        button.textContent = "Выделите и скопируйте";
+      };
+      try {
+        if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
+          failed();
+        } else {
+          navigator.clipboard.writeText(input.value).then(done).catch(failed);
+        }
+      } catch (e) {
+        failed();
+      }
       window.setTimeout(function () {
         button.textContent = original;
       }, 1600);

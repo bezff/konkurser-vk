@@ -15,17 +15,39 @@ function join_render(
     string $state,
     string $message,
     bool $needLaunchParams = false,
-    string $inviteUrl = ''
+    string $inviteUrl = '',
+    ?array $card = null
 ): void {
     view_start($title, null, $groupName, true, $needLaunchParams);
     echo '<section class="panel join-panel">';
     echo '<h1>' . h($title) . '</h1>';
     echo '<p class="flash ' . h($state) . '" id="join-status" role="status">' . h($message) . '</p>';
+    if ($card !== null) {
+        $points = (int) ($card['points'] ?? 0);
+        echo '<p class="lead">Ваши баллы в этом конкурсе: ' . $points . '.';
+        if (isset($card['place']) && $card['place'] !== null) {
+            echo ' Место: ' . (int) $card['place'] . '.';
+        }
+        echo '</p>';
+        $lines = is_array($card['lines'] ?? null) ? $card['lines'] : [];
+        if ($lines !== []) {
+            echo '<dl class="facts score-lines">';
+            foreach ($lines as $line) {
+                if (!is_array($line)) {
+                    continue;
+                }
+                echo '<div><dt>' . h((string) ($line['label'] ?? '')) . '</dt>';
+                echo '<dd>' . (int) ($line['points'] ?? 0) . '</dd></div>';
+            }
+            echo '</dl>';
+        }
+    }
     if ($inviteUrl !== '') {
-        echo '<p class="lead">Отправьте ссылку другу. Когда он вступит в сообщество, баллы получите вы оба.</p>';
+        echo '<p class="lead">Отправьте ссылку другу целиком, вместе с хвостом после #. Когда он вступит в сообщество, баллы получите вы оба.</p>';
         echo '<div class="copy-row">';
         echo '<input id="invite-url" readonly value="' . h($inviteUrl) . '">';
         echo '<button type="button" class="ghost" data-copy="invite-url">Скопировать</button>';
+        echo '<button type="button" class="ghost" data-share="invite-url">Отправить другу</button>';
         echo '</div>';
     }
     echo '</section>';
@@ -99,14 +121,7 @@ if ($contest === null) {
 $contestId = (int) $contest['id'];
 $contestOpen = $now < $contest['ends_at'];
 if ($contestOpen) {
-    $referrerId = 0;
-    if (isset($_GET['ref']) && is_string($_GET['ref']) && preg_match('/^\d+$/', $_GET['ref'])) {
-        $parsedRef = (int) $_GET['ref'];
-        $canonicalRef = ltrim($_GET['ref'], '0');
-        if ($parsedRef > 0 && (string) $parsedRef === $canonicalRef && $parsedRef !== $userId) {
-            $referrerId = $parsedRef;
-        }
-    }
+    $referrerId = referral_id_from_launch($_GET, $userId);
     if ($referrerId > 0) {
         try {
             referral_remember_click($pdo, $contestId, $userId, $referrerId, $now);
@@ -117,28 +132,56 @@ if ($contestOpen) {
 }
 
 $inviteUrl = $contestOpen ? contest_invite_url($settings, $userId) : '';
+$needsAccept = (int) ($contest['require_accept'] ?? 0) === 1;
+$score = static function () use ($pdo, $contestId, $userId, $needsAccept): ?array {
+    if ($needsAccept && !contest_has_accepted($pdo, $contestId, $userId)) {
+        return null;
+    }
+    return contest_user_card($pdo, $contestId, $userId);
+};
 
-if ((int) ($contest['require_accept'] ?? 0) !== 1) {
+if (!$contestOpen) {
+    join_render(
+        'Принятие акции',
+        $groupName,
+        'bad',
+        'Конкурс уже закончился.',
+        false,
+        '',
+        $score()
+    );
+    exit;
+}
+
+if (!$needsAccept) {
     join_render(
         'Принятие акции',
         $groupName,
         'ok',
         'В этом конкурсе переход по ссылке не нужен. Лайки и комментарии уже учитываются.',
         false,
-        $inviteUrl
+        $inviteUrl,
+        $score()
     );
     exit;
 }
 
-if (!$contestOpen) {
-    join_render('Принятие акции', $groupName, 'bad', 'Конкурс уже закончился.');
-    exit;
+$token = (string) ($settings['vk_access_token'] ?? '');
+$profile = vk_user_profile($token, $userId);
+$inviter = null;
+if (settings_points($settings, 'referral') > 0 || settings_points($settings, 'referral_friend') > 0) {
+    $inviter = referral_inviter_profile(
+        $pdo,
+        $contestId,
+        $userId,
+        static function (int $id) use ($token): ?array {
+            return vk_user_profile($token, $id);
+        }
+    );
 }
 
-$profile = vk_user_profile((string) ($settings['vk_access_token'] ?? ''), $userId);
-
 try {
-    $result = contest_accept($pdo, $contestId, $userId, $now, $profile);
+    $result = contest_accept($pdo, $contestId, $userId, $now, $profile, $inviter);
 } catch (Throwable $e) {
     app_log('accept: ' . $e->getMessage());
     join_render('Принятие акции', $groupName, 'bad', 'Не удалось сохранить принятие. Попробуйте ещё раз.');
@@ -152,7 +195,8 @@ if ($result['code'] === 'already') {
         'ok',
         'Вы уже принимали участие. Лайки, комментарии и вступление учитываются в рейтинге.',
         false,
-        $inviteUrl
+        $inviteUrl,
+        $score()
     );
     exit;
 }
@@ -165,5 +209,6 @@ join_render(
     . $contest['title']
     . '».',
     false,
-    $inviteUrl
+    $inviteUrl,
+    $score()
 );

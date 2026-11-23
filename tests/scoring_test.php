@@ -141,7 +141,70 @@ $repostZero = scoring_decide('wall_repost', [
 check($repostZero['action'] === 'ignore' && $repostZero['reason'] === 'bad_payload', 'zero from_id ignored');
 
 $repostBare = scoring_decide('wall_repost', ['from_id' => 7, 'id' => 1], 10);
-check($repostBare['action'] === 'ignore' && $repostBare['reason'] === 'bad_payload', 'missing copy_history ignored');
+check(
+    $repostBare['action'] === 'award' && $repostBare['key'] === 'repost:7',
+    'repost event without history still counts'
+);
+
+$repostOwner = scoring_decide('wall_repost', ['owner_id' => 7, 'id' => 2], 10);
+check($repostOwner['action'] === 'award' && $repostOwner['user_id'] === 7, 'repost user taken from owner_id');
+
+$repostObject = scoring_decide('wall_repost', [
+    'from_id' => 7,
+    'copy_history' => ['id' => 40, 'owner_id' => -10],
+], 10);
+check($repostObject['action'] === 'award' && $repostObject['key'] === 'repost:7', 'copy_history object counts');
+
+$repostChain = scoring_decide('wall_repost', [
+    'from_id' => 7,
+    'copy_history' => [
+        [
+            'id' => 3,
+            'owner_id' => 8,
+            'from_id' => 8,
+            'copy_history' => [
+                ['id' => 40, 'owner_id' => -10],
+            ],
+        ],
+    ],
+], 10);
+check($repostChain['action'] === 'award', 'repost of a repost counts');
+
+$repostFrom = scoring_decide('wall_repost', [
+    'from_id' => 7,
+    'copy_history' => [
+        ['id' => 40, 'from_id' => -10],
+    ],
+], 10);
+check($repostFrom['action'] === 'award', 'community from_id in history counts');
+
+$repostAttach = scoring_decide('wall_repost', [
+    'from_id' => 7,
+    'attachments' => [
+        ['type' => 'wall', 'wall' => ['id' => 40, 'owner_id' => -10]],
+    ],
+], 10);
+check($repostAttach['action'] === 'award', 'wall attachment of this community counts');
+
+$repostAttachOther = scoring_decide('wall_repost', [
+    'from_id' => 7,
+    'attachments' => [
+        ['type' => 'wall', 'wall' => ['id' => 40, 'owner_id' => -11]],
+    ],
+], 10);
+check($repostAttachOther['action'] === 'ignore' && $repostAttachOther['reason'] === 'not_group', 'other wall attachment ignored');
+
+check(referral_id_from_launch(['ref' => '77'], 5) === 77, 'query ref is the inviter');
+check(referral_id_from_launch(['hash' => 'ref=77'], 5) === 77, 'hash ref is the inviter');
+check(referral_id_from_launch(['hash' => 'ref%3D77'], 5) === 77, 'encoded hash ref is the inviter');
+check(referral_id_from_launch(['hash' => '#ref=77'], 5) === 77, 'hash fragment ref is the inviter');
+check(referral_id_from_launch(['vk_ref' => '77'], 5) === 77, 'numeric vk_ref is the inviter');
+check(referral_id_from_launch(['vk_ref' => 'snippet_im'], 5) === 0, 'source vk_ref is not an inviter');
+check(referral_id_from_launch(['ref' => '5'], 5) === 0, 'self ref is ignored');
+check(referral_id_from_launch(['ref' => '007'], 5) === 7, 'leading zeros still parse as the user id');
+check(referral_id_from_launch(['ref' => '99999999999999999999'], 5) === 0, 'overflow ref is ignored');
+check(referral_id_from_launch(['hash' => '77'], 5) === 77, 'bare hash digits are the inviter');
+check(referral_id_from_launch(['ref' => '0', 'hash' => 'ref=77'], 5) === 77, 'empty ref falls through to hash');
 
 $fresh = scoring_transition(null, true, 2);
 check($fresh['op'] === 'insert' && $fresh['result'] === 'awarded' && $fresh['points'] === 2, 'first award');
@@ -256,6 +319,27 @@ check($group !== null && $group['id'] === 15 && $group['name'] === 'Тест', '
 
 $legacy = vk_group_from_response([['id' => 8, 'name' => 'Старый']]);
 check($legacy !== null && $legacy['id'] === 8, 'legacy group list');
+
+$lines = contest_score_lines([
+    'repost' => 4,
+    'like' => 3,
+    'join' => 5,
+    'note' => 9,
+    'comment' => 0,
+]);
+check(
+    count($lines) === 3
+        && $lines[0]['label'] === 'Вступление'
+        && $lines[0]['points'] === 5
+        && $lines[1]['label'] === 'Лайки'
+        && $lines[2]['label'] === 'Репосты'
+        && $lines[2]['points'] === 4,
+    'score lines keep order and skip zeros'
+);
+check(scoring_rank_place(0, 3) === null, 'zero points have no place');
+check(scoring_rank_place(10, 0) === 1, 'nobody ahead means first place');
+check(scoring_rank_place(10, 3) === 4, 'place skips people with more points');
+check(scoring_rank_place(10, -2) === 1, 'negative ahead count is ignored');
 
 if ($failed > 0) {
     fwrite(STDERR, "$failed failed\n");
